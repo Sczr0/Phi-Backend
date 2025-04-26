@@ -1,0 +1,56 @@
+[package]
+name = "phi-backend-rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Web框架
+actix-web = "4.4.0"
+actix-cors = "0.6.4"
+
+# 序列化/反序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# HTTP客户端
+reqwest = { version = "0.11", features = ["json", "blocking"] }
+
+# 加密和解密
+aes = "0.8.3"
+base64 = "0.21.0"
+md-5 = "0.10.5"
+cbc = { version = "0.1.2", features = ["std"] }
+hex = "0.4"
+block-padding = "0.3.3"
+cipher = "0.4.0"
+
+# 二进制数据处理
+byteorder = "1.4"
+
+# 压缩和解压
+zip = "0.6.6"
+flate2 = "1.0.28"
+
+# 异步
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# 工具库
+lazy_static = "1.4.0"
+thiserror = "1.0"
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.10.0"
+dotenv = "0.15.0"
+csv = "1.2.2"
+
+# 数据库
+sqlx = { version = "0.7.4", features = [ "runtime-tokio", "tls-rustls", "sqlite", "chrono" ] }
+
+# Added from the code block
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+
+[features]
+default = []
