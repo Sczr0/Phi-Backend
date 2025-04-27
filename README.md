@@ -12,7 +12,7 @@
 
 ## 使用前提
 
-该服务需要使用Phigros游戏的数据文件，包括：
+该服务需要使用[phi-plugin](https://github.com/Catrong/phi-plugin)的数据文件，包括：
 
 - `info.csv`（歌曲信息）
 - `difficulty.csv`（歌曲难度定数）
@@ -197,6 +197,6 @@
 
 ## 致谢
 
-该项目的设计和部分数据处理逻辑参考了 [phi-plugin](https://github.com/Catrong/phi-plugin)
+该项目的大部分代码由LLM生成，设计和部分数据处理逻辑参考了 [phi-plugin](https://github.com/Catrong/phi-plugin)
 
-在此表示感谢awa
+在此一并表示感谢awa
