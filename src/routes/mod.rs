@@ -7,6 +7,8 @@ use crate::controllers::*;
 // use crate::services::song::SongService;
 // use crate::services::user::UserService;
 
+mod image_routes;
+
 // 配置所有路由
 pub fn configure(cfg: &mut web::ServiceConfig) {
     // 移除错误获取 pool 和创建服务的代码
@@ -35,4 +37,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
        // 歌曲相关路由 - 兼容旧接口
        .service(get_song_record)
        .service(get_song_info);
+       
+    // 配置图像生成路由
+    image_routes::configure(cfg);
 } 

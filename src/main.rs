@@ -16,6 +16,7 @@ mod utils;
 use services::phigros::PhigrosService;
 use services::song::SongService;
 use services::user::UserService;
+use utils::cover_loader;
 
 // 初始化数据库表
 async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
@@ -59,6 +60,16 @@ async fn main() -> std::io::Result<()> {
     
     // 初始化日志
     env_logger::init_from_env(Env::default().default_filter_or("info"));
+    
+    // --- 检查并准备曲绘资源 ---
+    if let Err(e) = cover_loader::ensure_covers_available() {
+        log::error!("初始化曲绘资源失败: {:?}", e);
+        // 根据需要决定是否退出程序
+        // return Err(std::io::Error::new(std::io::ErrorKind::Other, "Failed to initialize cover resources"));
+    } else {
+        log::info!("曲绘资源检查/准备完成.");
+    }
+    // --- 曲绘资源检查结束 ---
     
     // --- 数据库初始化 ---
     let database_url = env::var("DATABASE_URL")

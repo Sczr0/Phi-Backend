@@ -10,34 +10,57 @@ use crate::utils::error::AppResult;
 
 lazy_static! {
     pub static ref SONG_INFO: Arc<Vec<SongInfo>> = Arc::new({
-        let info = load_song_info().unwrap_or_default();
-        log::info!("已加载 {} 条歌曲信息", info.len());
-        // 输出一些示例歌曲信息以便调试
-        if !info.is_empty() {
-            log::debug!("歌曲信息示例 (前3条):");
-            for (i, song) in info.iter().take(3).enumerate() {
-                log::debug!(" {}: ID={}, 歌曲名={}, 作曲家={}", i + 1, song.id, song.song, song.composer);
+        match load_song_info() {
+            Ok(info) => {
+                log::info!("已加载 {} 条歌曲信息", info.len());
+                // 输出一些示例歌曲信息以便调试
+                if !info.is_empty() {
+                    log::debug!("歌曲信息示例 (前3条):");
+                    for (i, song) in info.iter().take(3).enumerate() {
+                        log::debug!(" {}: ID={}, 歌曲名={}, 作曲家={}", i + 1, song.id, song.song, song.composer);
+                    }
+                }
+                info
+            }
+            Err(e) => {
+                // Log the error if loading fails
+                log::error!("加载歌曲信息失败: {}", e);
+                // Return an empty vector as before, but after logging the error
+                Vec::new() 
             }
         }
-        info
     });
     pub static ref SONG_DIFFICULTY: Arc<Vec<SongDifficulty>> = Arc::new({
-        let difficulty = load_song_difficulty().unwrap_or_default();
-        log::info!("已加载 {} 条歌曲难度信息", difficulty.len());
-        // 输出一些示例难度信息以便调试
-        if !difficulty.is_empty() {
-            log::debug!("歌曲难度示例 (前3条):");
-            for (i, diff) in difficulty.iter().take(3).enumerate() {
-                log::debug!(" {}: ID={}, EZ={:?}, HD={:?}, IN={:?}, AT={:?}", 
-                    i + 1, diff.id, diff.ez, diff.hd, diff.inl, diff.at);
+        match load_song_difficulty() {
+            Ok(difficulty) => {
+                log::info!("已加载 {} 条歌曲难度信息", difficulty.len());
+                // 输出一些示例难度信息以便调试
+                if !difficulty.is_empty() {
+                    log::debug!("歌曲难度示例 (前3条):");
+                    for (i, diff) in difficulty.iter().take(3).enumerate() {
+                        log::debug!(" {}: ID={}, EZ={:?}, HD={:?}, IN={:?}, AT={:?}", 
+                            i + 1, diff.id, diff.ez, diff.hd, diff.inl, diff.at);
+                    }
+                }
+                difficulty
+            }
+            Err(e) => {
+                log::error!("加载歌曲难度信息失败: {}", e);
+                Vec::new()
             }
         }
-        difficulty
     });
     pub static ref SONG_NICKNAMES: Arc<NicknameMap> = Arc::new({
-        let nicknames = load_song_nicknames().unwrap_or_default();
-        log::info!("已加载 {} 条歌曲别名信息", nicknames.len());
-        nicknames
+        match load_song_nicknames() {
+            Ok(nicknames) => {
+                log::info!("已加载 {} 条歌曲别名信息", nicknames.len());
+                nicknames
+            }
+            Err(e) => {
+                log::error!("加载歌曲别名信息失败: {}", e);
+                HashMap::new()
+            }
+        }
     });
     // 索引方便查询
     pub static ref SONG_ID_TO_NAME: Arc<HashMap<String, String>> = Arc::new({

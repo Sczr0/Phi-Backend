@@ -4,6 +4,9 @@ use crate::models::{GameSave, RksResult, SongRecord};
 use crate::utils::error::{AppError, AppResult};
 use crate::utils::save_parser::{parse_save, parse_save_with_difficulty};
 
+// 导入UserProfile模型
+use crate::models::UserProfile;
+
 // Phigros API相关的常量
 const BASE_URL: &str = "https://rak3ffdi.cloud.tds1.tapapis.cn/1.1/";
 const LC_ID: &str = "rAK3FfdieFob2Nn8Am";
@@ -206,5 +209,42 @@ impl PhigrosService {
         hasher.update(data);
         let result = hasher.finalize();
         format!("{:x}", result)
+    }
+
+    // 获取用户Profile信息
+    pub async fn get_profile(&self, token: &str) -> AppResult<UserProfile> {
+        log::debug!("开始获取用户 Profile 信息...");
+        let response = self.client.get(format!("{}users/me", BASE_URL))
+            .header("X-LC-Id", LC_ID)
+            .header("X-LC-Key", LC_KEY)
+            .header("User-Agent", USER_AGENT)
+            .header("Accept", "application/json")
+            .header("X-LC-Session", token)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_else(|_| "无法读取错误信息".to_string());
+            log::error!("获取 Profile 失败: HTTP {}, 响应: {}", status, error_text);
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                return Err(AppError::AuthError("Token 无效或已过期".to_string()));
+            }
+            return Err(AppError::Other(format!(
+                "获取 Profile 失败: HTTP {}",
+                status
+            )));
+        }
+
+        match response.json::<UserProfile>().await {
+            Ok(profile) => {
+                log::debug!("成功获取 Profile: {}", profile.nickname);
+                Ok(profile)
+            }
+            Err(e) => {
+                log::error!("解析 Profile JSON 失败: {}", e);
+                Err(AppError::Other(format!("解析 Profile 响应失败: {}", e)))
+            }
+        }
     }
 } 

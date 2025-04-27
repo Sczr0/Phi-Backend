@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use chrono::{DateTime, Utc};
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UserProfile {
+    #[serde(rename = "objectId")]
+    pub object_id: String,
+    pub nickname: String,
+    // 可以根据需要添加其他从 /users/me 返回的字段
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PhigrosUser {
     pub qq: String,

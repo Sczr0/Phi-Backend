@@ -5,6 +5,8 @@ pub mod data_loader;
 pub mod error;
 pub mod save_parser;
 pub mod token_helper;
+pub mod image_renderer;
+pub mod cover_loader;
 
 // Remove unused re-exports
 // pub use aes_decrypt::*;
