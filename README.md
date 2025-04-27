@@ -90,23 +90,33 @@
 -   **`POST /unbind`**
     -   描述: 解除用户绑定。提供两种方式：
         1.  **QQ + Token 验证**: 提供与绑定记录完全匹配的QQ号和SessionToken。
-        2.  **QQ + 简介验证**: 仅提供QQ号，并需提前将游戏内个人简介修改为 `UNBIND-<你的QQ号>` (例如 `UNBIND-123456`)。
-    -   请求体: `IdentifierRequest` (包含 `qq` 和可选的 `token`)
+        2.  **简介验证**:
+         - 仅提供QQ号，系统会返回一个验证码。
+         - 提供QQ号和之前收到的验证码，系统将检查游戏内简介是否与验证码匹配。
+ 
+    -   请求体: `IdentifierRequest` (包含 `qq`，可选的 `token` 或 `verification_code`)
         ```json
         // 方式一：QQ + Token
         {
             "qq": "用户的QQ号",
             "token": "用户的SessionToken"
         }
-        // 方式二：QQ + 简介验证
+        // 方式二：简介验证 - 获取验证码
         {
             "qq": "用户的QQ号"
         }
+        // 简介验证 - 提交验证码
+        {
+            "qq": "用户的QQ号",
+            "verification_code": "第一步获取的验证码"
+        }
         ```
-    -   成功响应: `200 OK`，包含成功信息 (会注明是通过哪种方式解绑)。
+    -   成功响应: 
+        -   方式一、方式三: `200 OK`，包含成功信息 (会注明是通过哪种方式解绑)。
+        -   方式二 (验证码获取): `200 OK`，状态为 `verification_initiated`，包含验证码和过期时间。
     -   失败响应:
         -   `400 Bad Request`: 请求参数错误 (如QQ与Token不匹配，或未按要求提供参数)。
-        -   `401 Unauthorized`: Token格式无效 (方式一)，或用于验证简介的Token已失效 (方式二)。
+        -   `401 Unauthorized`: Token格式无效 (方式一)，或用于验证简介的Token已失效 (方式三)。
         -   `404 Not Found`: 提供的QQ号未绑定。
         -   `500 Internal Server Error`: 数据库或获取存档时发生内部错误。
 
@@ -125,22 +135,22 @@
     -   失败响应: `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
 -   **`POST /rks`**
-    -   描述: 由高到低排列单曲rks，输出对应成绩。
+    -   描述: 计算并返回用户所有歌曲的RKS分数，按分数由高到低排序。
     -   请求体: `IdentifierRequest`
-    -   成功响应: `200 OK`，包含谱面成绩。
+    -   成功响应: `200 OK`，包含各谱面的成绩及对应的RKS。
     -   失败响应: `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
 -   **`POST /b30`**
-    -   描述: 计算用户的B30 (Best 30) 成绩列表。
+    -   描述: 计算并返回用户的B30 (Best 30) 成绩列表。
     -   请求体: `IdentifierRequest`
     -   成功响应: `200 OK`，包含B30成绩列表。
     -   失败响应: `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
--   **`POST /bn/n`** (例如 `/bn/40` 获取B40)
-    -   描述: 计算用户的Best N成绩列表 (默认N=30，即B30)。
+-   **`POST /bn/{n}`** (例如 `/bn/40` 获取B40)
+    -   描述: 计算并返回用户的 Best N 成绩列表。路径参数 `n` 指定 N 的大小 (默认为 30)。
     -   请求体: `IdentifierRequest`
-    -   查询参数: `n` (可选, 整数, 指定N的大小)
-    -   成功响应: `200 OK`，包含Best N成绩列表。
+    -   路径参数: `n` (整数, 指定最佳成绩的数量)
+    -   成功响应: `200 OK`，包含 Best N 成绩列表。
     -   失败响应: `400 Bad Request` (n不是有效数字), `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
 ### 歌曲查询 (推荐使用新接口)
