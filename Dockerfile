@@ -1,4 +1,3 @@
-
 ARG RUST_VERSION=1.86.0
 ARG APP_NAME=phi-backend-rust
 
@@ -31,9 +30,9 @@ RUN rm -f target/release/deps/lib${APP_NAME}*
 # 复制运行时所需的资源文件 (确保它们在最终镜像中)
 COPY resources ./resources
 COPY info ./info
-COPY difficulty.csv .
-COPY info.csv .
-COPY nicklist.yaml .
+COPY info/difficulty.csv .
+COPY info/info.csv .
+COPY info/nicklist.yaml .
 RUN cargo build --release --locked
 
 # ---- Runtime Stage ----
@@ -69,12 +68,12 @@ USER appuser
 EXPOSE 3939
 
 # 设置环境变量 (从 .env 文件推断)
-ENV RUST_LOG=info
+# ENV RUST_LOG=info
 # 确保路径在容器内有效
-ENV INFO_DATA_PATH=/app/info
-ENV DIFFICULTY_FILE=/app/difficulty.csv
-ENV INFO_FILE=/app/info.csv
-ENV NICKLIST_FILE=/app/nicklist.yaml
+# ENV INFO_DATA_PATH=/app/info
+# ENV DIFFICULTY_FILE=/app/difficulty.csv
+# ENV INFO_FILE=/app/info.csv
+# ENV NICKLIST_FILE=/app/nicklist.yaml
 # 数据库路径通常在运行时通过环境变量或配置文件提供，并结合卷挂载
 # ENV DATABASE_URL=sqlite:/app/data/phigros_bindings.db
 

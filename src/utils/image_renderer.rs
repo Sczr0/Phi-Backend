@@ -124,8 +124,25 @@ fn generate_card_svg(
     let score_text = score.score.map_or("N/A".to_string(), |s| format!("{:.0}", s));
     writeln!(svg, r#"<text x="{}" y="{:.1}" class="text-score">{}</text>"#, text_x, score_y, score_text).map_err(fmt_err)?;
 
-    // Accuracy
-    let acc_text = format!("Acc: {:.2}%", score.acc);
+    // Accuracy (带最小推分acc)
+    let acc_text = if !is_ap_score && score.acc < 100.0 && score.difficulty_value > 0.0 { // 只有定数>0时才计算推分
+        // 计算最小推分acc
+        let min_push_acc = calculate_min_push_acc(score.rks, score.difficulty_value);
+        
+        // 如果最小推分acc非常接近100，直接显示 -> 100.00%
+        if min_push_acc > 99.995 {
+             format!("Acc: {:.2}% -> 100.00%", score.acc)
+        }
+        // 如果两者差值非常小(小于0.005，对应四舍五入后两位不变)，则展示三位小数
+        else if (min_push_acc - score.acc).abs() < 0.005 {
+            format!("Acc: {:.2}% -> {:.3}%", score.acc, min_push_acc)
+        } else {
+            format!("Acc: {:.2}% -> {:.2}%", score.acc, min_push_acc)
+        }
+    } else {
+        // AP或者已满分或者定数为0，只显示当前acc
+        format!("Acc: {:.2}%", score.acc)
+    };
     writeln!(svg, r#"<text x="{}" y="{:.1}" class="text-acc">{}</text>"#, text_x, acc_y, acc_text).map_err(fmt_err)?;
 
     // Level & RKS
@@ -289,9 +306,9 @@ pub fn generate_svg_string(
     // 将 Y 坐标调整回原来的 110
     writeln!(svg, r#"<text x="40" y="110" class="text-stat">{}</text>"#, bn_text).map_err(fmt_err)?;
 
-    // 更新时间位置保持不变
+    // 更新时间位置调整为与左上角的下边缘对齐
     let update_time = format!("Updated at {}", stats.update_time.format("%Y/%m/%d %H:%M:%S"));
-    writeln!(svg, r#"<text x="{}" y="40" class="text-time">{}</text>"#, width - 30, update_time).map_err(fmt_err)?;
+    writeln!(svg, r#"<text x="{}" y="110" class="text-time">{}</text>"#, width - 30, update_time).map_err(fmt_err)?;
 
     // 分割线位置保持不变
     writeln!(svg, "<line x1='40' y1='{}' x2='{}' y2='{}' stroke='#333848' stroke-width='1' stroke-opacity='0.7'/>", 
@@ -466,4 +483,38 @@ fn find_first_font_file(dir: &Path) -> Result<Option<PathBuf>, AppError> {
         }
     }
     Ok(None)
+}
+
+// 添加一个函数用于计算最小推分acc
+fn calculate_min_push_acc(current_rks: f64, difficulty_value: f64) -> f64 {
+    // RKS计算公式: RKS = ((acc - 55.0) / 45.0)^2 * 定数
+    // 需要求解: acc使得RKS增加0.01
+    // 即: ((acc - 55.0) / 45.0)^2 * 定数 = current_rks + 0.01
+
+    // 1. 计算目标RKS，确保不会因精度问题导致目标低于当前
+    let target_rks = (current_rks + 0.01).max(current_rks + 1e-9); // Add a small epsilon
+
+    // 处理定数为0或负数的情况，避免除零或无效计算
+    if difficulty_value <= 0.0 {
+        return 100.0; // 如果定数无效，无法推分，返回100%
+    }
+    
+    // 计算目标RKS / 定数，处理可能为负的情况（理论上不应发生，但防御性编程）
+    let rks_ratio = target_rks / difficulty_value;
+    if rks_ratio < 0.0 {
+         return 100.0; // 如果比率小于0，无法开方，返回100%
+    }
+    
+    // 2. 反推需要达到的acc
+    // target_rks = ((acc - 55.0) / 45.0)^2 * difficulty_value
+    // ((acc - 55.0) / 45.0)^2 = target_rks / difficulty_value
+    // (acc - 55.0) / 45.0 = sqrt(target_rks / difficulty_value)
+    // acc - 55.0 = 45.0 * sqrt(target_rks / difficulty_value)
+    // acc = 55.0 + 45.0 * sqrt(target_rks / difficulty_value)
+    
+    let min_acc = 55.0 + 45.0 * rks_ratio.sqrt();
+    
+    // 限制在100.0以内，因为acc不能超过100%
+    // 同时确保结果不低于当前acc（因为目标是增加rks）
+    min_acc.max(55.0).min(100.0) // Ensure acc is at least 55.0
 }

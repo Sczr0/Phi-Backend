@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  phi-backend:
+    build: .
+    container_name: phi-backend-rust
+    ports:
+      - "3939:3939"
+    volumes:
+      - phi-data:/app/data # Mount the named volume to /app/data
+    env_file:
+      - .env # Load environment variables from .env file
+    restart: unless-stopped
+
+volumes:
+  phi-data: # Define the named volume 
