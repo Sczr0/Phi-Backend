@@ -29,10 +29,12 @@ COPY src ./src
 RUN rm -f target/release/deps/lib${APP_NAME}*
 # 复制运行时所需的资源文件 (确保它们在最终镜像中)
 COPY resources ./resources
+# 复制整个 info 目录到 /app/info (builder stage)
 COPY info ./info
-COPY info/difficulty.csv .
-COPY info/info.csv .
-COPY info/nicklist.yaml .
+# (不再需要单独复制 csv/yaml 到根目录)
+# COPY info/difficulty.csv .
+# COPY info/info.csv .
+# COPY info/nicklist.yaml .
 RUN cargo build --release --locked
 
 # ---- Runtime Stage ----
@@ -51,10 +53,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 # 从构建阶段复制必要的运行时文件
 COPY --from=builder /app/target/release/${APP_NAME} /usr/local/bin/
 COPY --from=builder /app/resources ./resources
+# 从 builder 复制整个 /app/info 目录到 runtime 的 /app/info
 COPY --from=builder /app/info ./info
-COPY --from=builder /app/difficulty.csv .
-COPY --from=builder /app/info.csv .
-COPY --from=builder /app/nicklist.yaml .
+# (不再需要从 builder 复制单个文件)
+# COPY --from=builder /app/difficulty.csv .
+# COPY --from=builder /app/info.csv .
+# COPY --from=builder /app/nicklist.yaml .
 # 注意：如果需要 SQLite 数据库，需要在这里复制或通过卷挂载
 # COPY --from=builder /app/phigros_bindings.db ./phigros_bindings.db
 

@@ -30,15 +30,26 @@
 
 2.  **创建`.env`文件** (可选, 用于自定义配置)
     参考`.env.example`文件创建`.env`文件，可以配置数据库URL、服务器地址、端口和数据文件路径等。
-    ```dotenv
-    DATABASE_URL=sqlite:phigros_bindings.db
-    HOST=127.0.0.1
-    PORT=8080
-    # INFO_DATA_PATH=../info # 可选，默认使用项目根目录下的 info 文件夹
-    # INFO_FILE=info.csv
-    # DIFFICULTY_FILE=difficulty.csv
-    # NICKLIST_FILE=nicklist.yaml
+    ```bash
+    # 复制示例配置文件
+    cp .env.example .env
+    # 然后按需修改 .env 中的配置
     ```
+    
+    **配置说明**:
+    ```dotenv
+    # 数据库URL，默认使用项目根目录的SQLite文件
+    DATABASE_URL=sqlite:phigros_bindings.db
+    
+    # 服务器配置 (可选，有默认值)
+    # HOST=127.0.0.1
+    # PORT=8080
+    
+    # 数据文件路径 (可选，默认使用项目根目录下的info文件夹)
+    # INFO_DATA_PATH=info
+    ```
+    
+    **注意**: `.env` 文件用于本地开发环境，不应提交到Git仓库。
 
 3.  **编译项目**
     ```bash
@@ -194,6 +205,70 @@
     -   请求体: `IdentifierRequest`
     -   成功响应: `200 OK`，包含`SongRecord`。
     -   失败响应: `400 Bad Request`, `401 Unauthorized`, `404 Not Found`, `409 Conflict`, `500 Internal Server Error`。
+
+## Docker 部署
+
+如果你想使用 Docker 运行 Phi-Backend，本项目提供了 Dockerfile 和 docker-compose.yml 文件。
+
+1. **使用 Docker Compose (推荐)**
+
+   使用 Docker Compose 可以更简单地管理容器、数据卷和环境变量。
+
+   ```bash
+   # 确保Docker和Docker Compose已安装
+   # 启动服务
+   docker-compose up -d
+   
+   # 查看日志
+   docker-compose logs -f
+   ```
+
+   服务将在 `http://<your-host>:8080` 启动。
+
+2. **手动使用 Docker**
+
+   你也可以手动构建和运行Docker镜像。
+
+   ```bash
+   # 构建镜像
+   docker build -t phi-backend .
+   
+   # 创建数据目录
+   mkdir -p data info
+   
+   # 运行容器
+   docker run -d --name phi-backend \
+     -p 8080:8080 \
+     -v $(pwd)/data:/app/data \
+     -v $(pwd)/info:/app/info \
+     -e DATABASE_URL=sqlite:/app/data/phigros_bindings.db \
+     -e INFO_DATA_PATH=/app/info \
+     -e HOST=0.0.0.0 \
+     phi-backend
+   ```
+
+### Docker 环境变量配置
+
+在 Docker 环境中，你可以通过环境变量设置配置，无需使用 `.env` 文件。关键的环境变量有:
+
+- `DATABASE_URL`: 数据库连接URL (例如 `sqlite:/app/data/phigros_bindings.db`)
+- `INFO_DATA_PATH`: 数据文件目录 (例如 `/app/info`)
+- `HOST`: 绑定的主机地址，在容器中通常为 `0.0.0.0`
+- `PORT`: 服务端口号
+- `RUST_LOG`: 日志级别
+
+这些环境变量可以在 `docker-compose.yml` 的 `environment` 部分进行配置，或在 `docker run` 命令中通过 `-e` 参数设置。
+
+### 数据持久化
+
+Docker 配置使用卷映射来持久化数据:
+
+- `./data:/app/data`: 存储数据库文件
+- `./info:/app/info`: 存储歌曲信息文件
+
+确保这些目录在宿主机上存在并且包含必要的文件。
+
+在使用 Phi-Backend 之前，请确保 `info` 目录中包含必要的数据文件 (`info.csv`, `difficulty.csv`, `nicklist.yaml`)，这些可以从 [phi-plugin](https://github.com/Catrong/phi-plugin) 获取。
 
 ## 致谢
 

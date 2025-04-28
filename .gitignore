@@ -1,0 +1,15 @@
+ # Rust build artifacts
+/target/
+
+# Environment configuration file
+.env
+phigros_bindings.db
+
+# IDE/Editor specific files
+.idea/
+.vscode/
+.cursor/
+
+# OS specific files
+.DS_Store
+Thumbs.db
