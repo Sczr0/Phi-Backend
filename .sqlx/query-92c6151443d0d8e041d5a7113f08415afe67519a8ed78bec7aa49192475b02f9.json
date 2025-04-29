@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM push_acc WHERE player_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "92c6151443d0d8e041d5a7113f08415afe67519a8ed78bec7aa49192475b02f9"
+}

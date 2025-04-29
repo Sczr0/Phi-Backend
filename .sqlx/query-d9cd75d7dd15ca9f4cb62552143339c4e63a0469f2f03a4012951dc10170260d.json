@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO push_acc (player_id, song_id, difficulty, push_acc, update_time) \n                     VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "d9cd75d7dd15ca9f4cb62552143339c4e63a0469f2f03a4012951dc10170260d"
+}

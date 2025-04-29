@@ -1,4 +1,5 @@
 pub mod phigros;
 pub mod song;
 pub mod user;
-pub mod image_service; 
+pub mod image_service;
+pub mod player_archive_service; 

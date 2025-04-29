@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE player_archives SET rks = ?, update_time = ? WHERE player_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "8c55962979770049f4f78c692b9cdfc2b1a41692702ab536988474064738a4c8"
+}

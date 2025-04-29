@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT song_id, difficulty, push_acc FROM push_acc WHERE player_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "song_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "difficulty",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "push_acc",
+        "ordinal": 2,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e704ae96ea44f572e0da08e48eaa4ac594090ac3105cc21ee34dff23b0c5e52a"
+}

@@ -16,42 +16,8 @@ mod utils;
 use services::phigros::PhigrosService;
 use services::song::SongService;
 use services::user::UserService;
+use services::player_archive_service::PlayerArchiveService;
 use utils::cover_loader;
-
-// 初始化数据库表
-async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    // 创建用户绑定表 (已存在)
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS user_bindings (
-            qq TEXT PRIMARY KEY NOT NULL,
-            session_token TEXT NOT NULL, -- 移除 UNIQUE 约束，如果你确认要一个 Token 绑定多个 QQ
-            nickname TEXT,
-            last_update TEXT
-        )
-        "#,
-    )
-    .execute(pool)
-    .await?; // 使用 ? 简化错误处理
-
-    // --- 新增代码开始 ---
-    // 创建解绑验证码表
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS unbind_verification_codes (
-            qq TEXT PRIMARY KEY NOT NULL,
-            code TEXT NOT NULL,
-            expires_at DATETIME NOT NULL
-        )
-        "#,
-    )
-    .execute(pool)
-    .await?; // 使用 ? 简化错误处理
-    // --- 新增代码结束 ---
-
-    log::info!("数据库表初始化检查完成"); // 修改日志信息
-    Ok(())
-}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -115,15 +81,28 @@ async fn main() -> std::io::Result<()> {
             log::error!("无法创建数据库连接池: {}", e);
             std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to create database connection pool: {}", e))
         })?;
-    
-    // 初始化数据库表
-    init_db(&pool).await.map_err(|e| {
-        log::error!("数据库初始化失败: {}", e);
-        std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to initialize database: {}", e))
-    })?;
-    log::info!("数据库初始化成功");
+
+    // --- 运行数据库迁移 ---
+    log::info!("正在运行数据库迁移...");
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .map_err(|e| {
+            log::error!("数据库迁移失败: {}", e);
+            std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to run database migrations: {}", e))
+        })?;
+    log::info!("数据库迁移完成");
+
     // --- 数据库初始化结束 ---
-    
+
+    // 初始化玩家存档服务
+    let archive_config = crate::models::player_archive::ArchiveConfig {
+        store_push_acc: true,
+        best_n_count: 27,
+        history_max_records: 10,
+    };
+    let player_archive_service = PlayerArchiveService::new(pool.clone(), Some(archive_config));
+
     log::info!("正在启动服务器 http://{}:{}", host, port);
 
     // 创建并启动HTTP服务器
@@ -138,11 +117,13 @@ async fn main() -> std::io::Result<()> {
         let phigros_service = web::Data::new(PhigrosService::new());
         let song_service = web::Data::new(SongService::new());
         let user_service = web::Data::new(UserService::new(pool.clone()));
+        let player_archive_service = web::Data::new(player_archive_service.clone());
 
         App::new()
             .app_data(phigros_service.clone())
             .app_data(song_service.clone())
             .app_data(user_service.clone())
+            .app_data(player_archive_service.clone())
             .wrap(middleware::Logger::default())
             .wrap(cors)
             .configure(routes::configure)
