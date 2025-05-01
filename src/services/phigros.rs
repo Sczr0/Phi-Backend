@@ -45,10 +45,10 @@ impl PhigrosService {
         parse_save_with_difficulty(&save_data)
     }
     
-    // 获取RKS计算结果
-    pub async fn get_rks(&self, token: &str) -> AppResult<RksResult> {
-        log::debug!("进入 get_rks 服务函数");
-        // 获取带难度信息的存档
+    // (优化后) 获取RKS计算结果，并同时返回用于计算的GameSave
+    pub async fn get_rks(&self, token: &str) -> AppResult<(RksResult, GameSave)> { // 返回元组
+        log::debug!("进入 get_rks 服务函数 (优化版)");
+        // 获取带难度信息的存档 (只获取一次)
         let save = self.get_save_with_difficulty(token).await?;
         log::debug!("get_rks: 已获取带难度信息的存档");
         
@@ -90,7 +90,9 @@ impl PhigrosService {
         log::debug!("get_rks: 调用 RksResult::new 进行排序和包装...");
         let result = RksResult::new(rks_records);
         log::debug!("get_rks: RksResult 创建完成，包含 {} 条记录", result.records.len());
-        Ok(result)
+        
+        // 返回 RksResult 和 GameSave
+        Ok((result, save)) 
     }
     
     // 获取特定歌曲的成绩

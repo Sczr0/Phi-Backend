@@ -1,12 +1,14 @@
-use actix_web::{web, HttpResponse};
+use actix_web::{post, web, HttpResponse};
 use log::debug;
 
 use crate::models::{ApiResponse, user::IdentifierRequest};
-use crate::services::{PhigrosService, UserService};
+use crate::services::phigros::PhigrosService;
+use crate::services::user::UserService;
 use crate::utils::error::AppResult;
 use crate::utils::token_helper::resolve_token;
 
 /// 计算RKS
+#[post("/rks")]
 pub async fn calculate_rks(
     req: web::Json<IdentifierRequest>,
     phigros_service: web::Data<PhigrosService>,
@@ -18,7 +20,7 @@ pub async fn calculate_rks(
     let token = resolve_token(&req, &user_service).await?;
     
     // 计算RKS
-    let rks_result = phigros_service.get_rks(&token).await?;
+    let (rks_result, _) = phigros_service.get_rks(&token).await?;
     
     // 返回成功响应
     Ok(HttpResponse::Ok().json(ApiResponse {
@@ -29,33 +31,8 @@ pub async fn calculate_rks(
     }))
 }
 
-/// 获取B30成绩
-pub async fn get_b30(
-    req: web::Json<IdentifierRequest>,
-    phigros_service: web::Data<PhigrosService>,
-    user_service: web::Data<UserService>,
-) -> AppResult<HttpResponse> {
-    debug!("接收到B30查询请求");
-    
-    // 解析token
-    let token = resolve_token(&req, &user_service).await?;
-    
-    // 计算RKS
-    let rks_result = phigros_service.get_rks(&token).await?;
-    
-    // 取前30条记录
-    let b30 = rks_result.records.into_iter().take(30).collect::<Vec<_>>();
-    
-    // 返回成功响应
-    Ok(HttpResponse::Ok().json(ApiResponse {
-        code: 200,
-        status: "OK".to_string(),
-        message: None,
-        data: Some(b30),
-    }))
-}
-
 /// 获取Bn成绩
+#[post("/bn/{n}")]
 pub async fn get_bn(
     n: web::Path<u32>,
     req: web::Json<IdentifierRequest>,
@@ -79,7 +56,7 @@ pub async fn get_bn(
     let token = resolve_token(&req, &user_service).await?;
     
     // 计算RKS
-    let rks_result = phigros_service.get_rks(&token).await?;
+    let (rks_result, _) = phigros_service.get_rks(&token).await?;
     
     // 取前n条记录
     let bn = rks_result.records.into_iter().take(n as usize).collect::<Vec<_>>();

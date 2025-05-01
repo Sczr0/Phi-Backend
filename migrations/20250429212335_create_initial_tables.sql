@@ -1,18 +1,22 @@
--- migrations/YYYYMMDDHHMMSS_create_initial_tables.sql (请使用你实际生成的文件名)
+-- migrations/20250429212335_create_initial_tables.sql
 
--- Create user_bindings table
-CREATE TABLE user_bindings (
-    qq TEXT PRIMARY KEY NOT NULL,
-    session_token TEXT NOT NULL,
+-- Create internal_users table (新增)
+CREATE TABLE internal_users (
+    internal_id TEXT PRIMARY KEY NOT NULL,
     nickname TEXT,
-    last_update TEXT
+    update_time TEXT NOT NULL
 );
 
--- Create unbind_verification_codes table
-CREATE TABLE unbind_verification_codes (
-    qq TEXT PRIMARY KEY NOT NULL,
-    code TEXT NOT NULL,
-    expires_at DATETIME NOT NULL
+-- Create platform_bindings table (新增)
+CREATE TABLE platform_bindings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    internal_id TEXT NOT NULL,
+    platform TEXT NOT NULL, -- 平台标识，如 "qq", "discord" 等
+    platform_id TEXT NOT NULL, -- 平台用户ID
+    session_token TEXT NOT NULL,
+    bind_time TEXT NOT NULL,
+    UNIQUE(platform, platform_id),
+    FOREIGN KEY(internal_id) REFERENCES internal_users(internal_id)
 );
 
 -- Create player_archives table
@@ -41,6 +45,15 @@ CREATE TABLE chart_scores (
     UNIQUE(player_id, song_id, difficulty, play_time)
 );
 
+-- Create unbind_verification_codes table (修改)
+CREATE TABLE unbind_verification_codes (
+    platform TEXT NOT NULL,
+    platform_id TEXT NOT NULL,
+    code TEXT NOT NULL,
+    expires_at DATETIME NOT NULL,
+    PRIMARY KEY (platform, platform_id)
+);
+
 -- Create push_acc table
 CREATE TABLE push_acc (
     player_id TEXT NOT NULL,
@@ -54,3 +67,5 @@ CREATE TABLE push_acc (
 -- Create indexes
 CREATE INDEX idx_chart_scores_player_current ON chart_scores (player_id, is_current);
 CREATE INDEX idx_chart_scores_player_song_diff ON chart_scores (player_id, song_id, difficulty);
+CREATE INDEX idx_platform_bindings_internal_id ON platform_bindings (internal_id);
+CREATE INDEX idx_platform_bindings_platform ON platform_bindings (platform, platform_id);

@@ -9,6 +9,9 @@
 - 计算玩家RKS及其构成成绩 (B30, Best N)
 - 查询单曲成绩
 - 统一查询歌曲信息（支持ID、名称、别名）
+- 生成B30/BN成绩图片
+- 生成单曲成绩图片
+- 生成RKS排行榜图片
 
 ## 使用前提
 
@@ -70,65 +73,120 @@
 **通用请求体:**
 
 -   **`IdentifierRequest`** (用于需要用户身份的接口)
-    -   请求体中必须包含 `token` 或 `qq` 字段中的至少一个。
-    -   如果两者都提供，优先使用 `token`。
+    -   请求体中必须包含 `token` 或 (`platform` 和 `platform_id`) 中的至少一组。
+    -   如果都提供，优先使用 `token`。
     ```json
     // 方式一：使用 SessionToken
     {
         "token": "用户的Phigros SessionToken"
     }
-    // 方式二：使用 QQ 号 (如果已绑定)
+    // 方式二：使用平台和平台ID (如果已绑定)
     {
-        "qq": "用户的QQ号"
+        "platform": "平台名称",
+        "platform_id": "平台用户ID"
     }
     ```
 
 ### 用户绑定
 
 -   **`POST /bind`**
-    -   描述: 绑定用户的QQ号和Phigros SessionToken。
-    -   注意: 一个QQ号只能绑定一个SessionToken。如果尝试绑定的QQ号已被使用，会返回错误。一个SessionToken可以绑定多个QQ号。
+    -   描述: 绑定平台ID和Phigros SessionToken。
+    -   注意: 同一个平台下的ID同时只能绑定一个SessionToken。如果同一平台下尝试使用不同Token绑定，会更新绑定关系。一个内部ID可以关联多个平台ID。
     -   请求体:
         ```json
         {
-            "qq": "用户的QQ号",
+            "platform": "平台名称",
+            "platform_id": "平台用户ID",
             "token": "用户的Phigros SessionToken"
         }
         ```
-    -   成功响应: `200 OK`，包含成功信息。
-    -   失败响应: `400 Bad Request` (参数错误), `401 Unauthorized` (Token格式无效), `409 Conflict` (QQ已被绑定), `500 Internal Server Error`。
+    -   成功响应: `200 OK`，包含成功信息和内部ID。
+      ```json
+      {
+          "code": 200,
+          "status": "success",
+          "message": "绑定成功",
+          "data": {
+              "internal_id": "用户内部ID"
+          }
+      }
+      ```
+    -   失败响应: `400 Bad Request` (参数错误), `401 Unauthorized` (Token格式无效), `500 Internal Server Error`。
+
+-   **`POST /token/list`**
+    -   描述: 获取用户关联的所有平台ID和Token列表。
+    -   请求体: `IdentifierRequest`
+    -   成功响应: `200 OK`，包含内部ID和绑定信息列表。
+      ```json
+      {
+          "code": 200,
+          "status": "success",
+          "message": "获取Token列表成功",
+          "data": {
+              "internal_id": "用户内部ID",
+              "bindings": [
+                  {
+                      "platform": "平台名称1",
+                      "platform_id": "平台用户ID1",
+                      "session_token": "SessionToken1",
+                      "bind_time": "绑定时间"
+                  },
+                  {
+                      "platform": "平台名称2",
+                      "platform_id": "平台用户ID2",
+                      "session_token": "SessionToken2",
+                      "bind_time": "绑定时间"
+                  }
+              ]
+          }
+      }
+      ```
+    -   失败响应: `400 Bad Request`, `404 Not Found`, `500 Internal Server Error`。
 
 -   **`POST /unbind`**
     -   描述: 解除用户绑定。提供两种方式：
-        1.  **QQ + Token 验证**: 提供与绑定记录完全匹配的QQ号和SessionToken。
+        1.  **平台+平台ID+Token 验证**: 提供与绑定记录完全匹配的平台、平台ID和SessionToken。
         2.  **简介验证**:
-         - 仅提供QQ号，系统会返回一个验证码。
-         - 提供QQ号和之前收到的验证码，系统将检查游戏内简介是否与验证码匹配。
+         - 仅提供平台和平台ID，系统会返回一个验证码。
+         - 提供平台、平台ID和之前收到的验证码，系统将检查游戏内简介是否与验证码匹配。
  
-    -   请求体: `IdentifierRequest` (包含 `qq`，可选的 `token` 或 `verification_code`)
+    -   请求体: `IdentifierRequest` (包含 `platform`, `platform_id`，可选的 `token` 或 `verification_code`)
         ```json
-        // 方式一：QQ + Token
+        // 方式一：平台+平台ID+Token
         {
-            "qq": "用户的QQ号",
-            "token": "用户的SessionToken"
+            "platform": "平台名称",
+            "platform_id": "平台用户ID",
+            "token": "SessionToken"
         }
         // 方式二：简介验证 - 获取验证码
         {
-            "qq": "用户的QQ号"
+            "platform": "平台名称",
+            "platform_id": "平台用户ID"
         }
         // 简介验证 - 提交验证码
         {
-            "qq": "用户的QQ号",
+            "platform": "平台名称",
+            "platform_id": "平台用户ID",
             "verification_code": "第一步获取的验证码"
         }
         ```
     -   成功响应: 
-        -   方式一、方式三: `200 OK`，包含成功信息 (会注明是通过哪种方式解绑)。
-        -   方式二 (验证码获取): `200 OK`，状态为 `verification_initiated`，包含验证码和过期时间。
+        -   方式一、方式三: `200 OK`，包含成功信息和内部ID。
+          ```json
+          {
+              "code": 200,
+              "status": "success",
+              "message": "解绑成功 (平台ID+Token验证)",
+              "data": {
+                  "internal_id": "用户内部ID"
+              }
+          }
+          ```
+        -   方式二 (验证码获取): `200 OK`，状态为 `verification_initiated`，包含验证码、过期时间和内部ID。
     -   失败响应:
-        -   `400 Bad Request`: 请求参数错误 (如QQ与Token不匹配，或未按要求提供参数)。
-        -   `401 Unauthorized`: Token格式无效 (方式一)，或用于验证简介的Token已失效 (方式三)。
-        -   `404 Not Found`: 提供的QQ号未绑定。
+        -   `400 Bad Request`: 请求参数错误。
+        -   `401 Unauthorized`: Token格式无效，或用于验证简介的Token已失效。
+        -   `404 Not Found`: 提供的平台和平台ID未绑定。
         -   `500 Internal Server Error`: 数据库或获取存档时发生内部错误。
 
 ### 存档与RKS
@@ -205,6 +263,50 @@
     -   请求体: `IdentifierRequest`
     -   成功响应: `200 OK`，包含`SongRecord`。
     -   失败响应: `400 Bad Request`, `401 Unauthorized`, `404 Not Found`, `409 Conflict`, `500 Internal Server Error`。
+
+### 图片生成接口
+
+-   **`POST /image/bn/{n}`**
+    -   描述: 生成用户的Best N成绩图片。
+    -   路径参数: `n` (整数, 指定最佳成绩的数量)
+    -   请求体: `IdentifierRequest`
+    -   成功响应: `200 OK`，返回PNG格式的图片数据。
+    -   失败响应: `400 Bad Request` (n不是有效数字), `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
+
+-   **`POST /image/song`**
+    -   描述: 生成指定歌曲的成绩图片。
+    -   查询参数:
+        -   `q`: (必需) 歌曲ID、名称或别名。
+    -   请求体: `IdentifierRequest`
+    -   示例: `POST /image/song?q=痉挛`
+    -   成功响应: `200 OK`，返回PNG格式的图片数据。
+    -   失败响应: `400 Bad Request`, `401 Unauthorized`, `404 Not Found`, `409 Conflict` (歌曲查询结果不唯一), `500 Internal Server Error`。
+
+-   **`GET /image/leaderboard/rks`**
+    -   描述: 生成RKS排行榜图片。
+    -   查询参数:
+        -   `limit`: (可选) 显示的玩家数量，默认为20。
+    -   示例: `GET /image/leaderboard/rks?limit=10`
+    -   成功响应: `200 OK`，返回PNG格式的图片数据。
+    -   失败响应: `500 Internal Server Error`。
+
+## 数据模型
+
+系统使用以下主要数据模型：
+
+1. **内部用户 (InternalUser)**
+   - 每个用户都有一个系统生成的内部ID
+   - 包含可选的昵称和用户相关信息
+
+2. **平台绑定 (PlatformBinding)**
+   - 关联内部用户ID与各平台账号
+   - 一个内部用户可以关联多个平台账号
+   - 每个平台账号绑定一个SessionToken
+   - 平台名称大小写不敏感
+
+3. **验证码 (UnbindVerificationCode)**
+   - 用于验证解绑请求
+   - 通过平台名称和平台ID关联到特定绑定
 
 ## Docker 部署
 

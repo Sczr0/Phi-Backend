@@ -79,4 +79,15 @@ impl Default for ArchiveConfig {
             history_max_records: 10,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RKSRankingEntry {
+    pub player_id: String,
+    pub player_name: String,
+    pub rks: f64,
+    pub b27_rks: Option<f64>,   // Best 27 平均分
+    pub ap3_rks: Option<f64>,   // AP Top 3 平均分
+    pub ap_count: Option<usize>, // AP 总数
+    pub update_time: DateTime<Utc>,
 } 

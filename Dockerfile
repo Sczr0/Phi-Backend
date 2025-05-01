@@ -62,6 +62,9 @@ COPY --from=builder /app/info ./info
 # 注意：如果需要 SQLite 数据库，需要在这里复制或通过卷挂载
 # COPY --from=builder /app/phigros_bindings.db ./phigros_bindings.db
 
+# 创建数据目录
+RUN mkdir -p /app/data && chown -R appuser:appgroup /app/data
+
 # 设置文件所有权
 RUN chown -R appuser:appgroup /app /usr/local/bin/${APP_NAME}
 
@@ -69,7 +72,7 @@ RUN chown -R appuser:appgroup /app /usr/local/bin/${APP_NAME}
 USER appuser
 
 # 暴露端口
-EXPOSE 3939
+EXPOSE 8080
 
 # 设置环境变量 (从 .env 文件推断)
 # ENV RUST_LOG=info

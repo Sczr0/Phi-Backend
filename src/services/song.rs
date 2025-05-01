@@ -262,4 +262,19 @@ impl SongService {
     pub fn get_song_info(&self, id: &str) -> AppResult<SongInfo> {
         self.search_song(id)
     }
+    
+    // 根据歌曲ID获取歌曲信息 (song_controller.rs兼容函数)
+    pub fn get_song_by_id(&self, id: &str) -> AppResult<SongInfo> {
+        self.search_song(id)
+    }
+    
+    // 根据歌曲名称获取歌曲信息 (song_controller.rs兼容函数)
+    pub fn search_song_by_name(&self, name: &str) -> AppResult<SongInfo> {
+        self.search_song(name)
+    }
+    
+    // 根据歌曲别名获取歌曲信息 (song_controller.rs兼容函数)
+    pub fn search_song_by_nickname(&self, nickname: &str) -> AppResult<SongInfo> {
+        self.search_song(nickname)
+    }
 } 

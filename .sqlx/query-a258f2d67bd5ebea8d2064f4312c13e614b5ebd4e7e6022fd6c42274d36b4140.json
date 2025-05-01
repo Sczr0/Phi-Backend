@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO player_archives (player_id, player_name, rks, update_time) VALUES (?, ?, ?, ?) \n              ON CONFLICT(player_id) DO UPDATE SET player_name = excluded.player_name, update_time = excluded.update_time",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "a258f2d67bd5ebea8d2064f4312c13e614b5ebd4e7e6022fd6c42274d36b4140"
+}

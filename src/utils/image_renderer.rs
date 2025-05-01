@@ -16,6 +16,7 @@ use std::env; // Added for potential future use, though not directly in this edi
 // 导入 rand 相关
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use crate::models::player_archive::RKSRankingEntry;
 
 
 pub struct PlayerStats {
@@ -50,6 +51,14 @@ pub struct SongRenderData {
     pub difficulty_scores: HashMap<String, Option<SongDifficultyScore>>,
     // 歌曲插画路径 (用于渲染)
     pub illustration_path: Option<PathBuf>,
+}
+
+/// 排行榜渲染数据
+pub struct LeaderboardRenderData {
+    pub title: String,
+    pub update_time: DateTime<Utc>,
+    pub entries: Vec<RKSRankingEntry>,
+    pub display_count: usize,
 }
 
 
@@ -992,5 +1001,120 @@ pub fn generate_song_svg_string(
     // --- End SVG ---
     writeln!(svg, "</svg>").map_err(fmt_err)?;
 
+    Ok(svg)
+}
+
+/// 生成排行榜SVG字符串
+pub fn generate_leaderboard_svg_string(data: &LeaderboardRenderData) -> Result<String, AppError> {
+    // -- 定义 fmt_err 闭包 --
+    let fmt_err = |e| AppError::InternalError(format!("SVG formatting error: {}", e));
+    // -- 结束定义 --
+    
+    let width = 1200;
+    let row_height = 60;
+    let header_height = 120;
+    let footer_height = 40;
+    let total_height = header_height + (data.entries.len() as i32 * row_height as i32) + footer_height;
+
+    let mut svg = String::with_capacity(20000);
+    svg.push_str(&format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}">"#, 
+                width, total_height, width, total_height));
+
+    // 添加渐变背景和样式
+    // 使用 r##"..."## 来避免 # 颜色值与原始字符串分隔符冲突
+    svg.push_str(r##"
+    <defs>
+        <linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#1a1a2e" />
+            <stop offset="100%" stop-color="#16213e" />
+        </linearGradient>
+        <style>
+            @font-face {
+                font-family: 'NotoSansSC';
+                src: url('https://fonts.gstatic.com/s/notosanssc/v36/k3kXo84MPvpLmixcA63oeALhLIiP-Q-87KaAavc.woff2') format('woff2');
+            }
+            .header-text { 
+                font-family: 'NotoSansSC', sans-serif; 
+                font-size: 48px; 
+                fill: white; 
+                text-anchor: middle; 
+                font-weight: bold; /* 加粗标题 */
+            }
+            .rank-text { 
+                font-family: 'NotoSansSC', sans-serif; 
+                font-size: 32px; 
+                fill: white; 
+                text-anchor: middle; 
+                font-weight: bold;
+            }
+            .name-text { 
+                font-family: 'NotoSansSC', sans-serif; 
+                font-size: 32px; 
+                fill: white; 
+                text-anchor: start; 
+            }
+            .rks-text { 
+                font-family: 'NotoSansSC', sans-serif; 
+                font-size: 32px; 
+                fill: white; 
+                text-anchor: end; 
+                font-weight: bold;
+            }
+            .footer-text { 
+                font-family: 'NotoSansSC', sans-serif; 
+                font-size: 20px; 
+                fill: #aaaaaa; 
+                text-anchor: end; 
+            }
+        </style>
+    </defs>
+"##); // <--- 修正结束符的位置，紧跟在 </defs> 之后
+
+    // 绘制背景
+    svg.push_str(&format!(r#"<rect width="{}" height="{}" fill="url(#bg-gradient)" />"#, width, total_height));
+
+    // 绘制标题
+    svg.push_str(&format!(r#"<text x="{}" y="{}" class="header-text">{}</text>"#, 
+                width / 2, header_height / 2 + 16, data.title));
+
+    // 绘制表头分隔线
+    write!(svg, r##"<line x1="20" y1="{}" x2="{}" y2="{}" stroke="#4a5568" stroke-width="2" />"##, 
+            header_height, width - 20, header_height).map_err(fmt_err)?;
+
+    // 绘制排行榜条目
+    for (i, entry) in data.entries.iter().enumerate() {
+        let y_pos = header_height + (i as i32 * row_height as i32);
+        
+        // 绘制排名
+        write!(svg, r##"<text x="60" y="{}" class="rank-text">#{}</text>"##, 
+                y_pos + (row_height / 2) as i32 + 10, i + 1).map_err(fmt_err)?;
+        
+        // 绘制玩家名
+        let name_display = if entry.player_name.len() > 20 {
+            format!("{}...", &entry.player_name[0..17])
+        } else {
+            entry.player_name.clone()
+        };
+        write!(svg, r##"<text x="120" y="{}" class="name-text">{}</text>"##, 
+                y_pos + (row_height / 2) as i32 + 10, name_display).map_err(fmt_err)?;
+        
+        // 绘制RKS
+        write!(svg, r##"<text x="{}" y="{}" class="rks-text">{:.2}</text>"##, 
+                width - 60, y_pos + (row_height / 2) as i32 + 10, entry.rks).map_err(fmt_err)?;
+        
+        // 如果不是最后一行，绘制分隔线
+        if i < data.entries.len() - 1 {
+            let line_y = y_pos + row_height as i32; // Cast here
+            write!(svg, r##"<line x1="100" y1="{}" x2="{}" y2="{}" stroke="#2d3748" stroke-width="1" />"##, 
+                    line_y, width - 100, line_y).map_err(fmt_err)?;
+        }
+    }
+
+    // 绘制底部更新时间
+    let time_str = data.update_time.format("%Y-%m-%d %H:%M:%S").to_string();
+    svg.push_str(&format!(r#"<text x="{}" y="{}" class="footer-text">更新时间: {} UTC</text>"#, 
+                width - 60, total_height - 15, time_str));
+
+    svg.push_str("</svg>");
     Ok(svg)
 }

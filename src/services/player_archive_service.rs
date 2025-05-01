@@ -1,5 +1,5 @@
 use crate::models::player_archive::{
-    PlayerArchive, ChartScore, ChartScoreHistory, ArchiveConfig, PlayerBasicInfo
+    PlayerArchive, ChartScore, ChartScoreHistory, ArchiveConfig, PlayerBasicInfo, RKSRankingEntry
 };
 use crate::models::rks::RksRecord;
 use crate::utils::error::AppError;
@@ -8,6 +8,7 @@ use sqlx::{SqlitePool, query, query_as};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use log;
+use sqlx::{Sqlite, Row};
 
 #[derive(Clone)]
 pub struct PlayerArchiveService {
@@ -337,7 +338,7 @@ impl PlayerArchiveService {
         Ok(final_rks)
     }
     
-    /// 从RksRecord列表更新玩家成绩
+    /// (优化后) 从RKS记录批量更新玩家成绩，并在最后计算RKS和推分ACC
     pub async fn update_player_scores_from_rks_records(
         &self, 
         player_id: &str, 
@@ -345,28 +346,119 @@ impl PlayerArchiveService {
         rks_records: &[RksRecord],
         fc_map: &HashMap<String, bool>, // 谱面ID-难度 -> 是否FC
     ) -> Result<(), AppError> {
-        log::info!("批量更新玩家[{}]成绩, 共{}条记录", player_id, rks_records.len());
+        log::info!("批量更新玩家[{}] ({}) 的成绩, 共{}条记录", player_id, player_name, rks_records.len());
         
-        // 为每个记录创建ChartScore并更新
+        if rks_records.is_empty() {
+            log::warn!("RKS记录为空，无需更新玩家[{}] ({}) 的成绩", player_id, player_name);
+            // Even if no records, update the player_archives table timestamp if needed, or ensure the player exists
+            let mut tx = self.pool.begin().await
+                .map_err(|e| AppError::DatabaseError(format!("开始事务失败: {}", e)))?;
+            let update_time_str = Utc::now().to_rfc3339();
+            query!(
+                "INSERT INTO player_archives (player_id, player_name, rks, update_time) VALUES (?, ?, ?, ?) 
+                 ON CONFLICT(player_id) DO UPDATE SET player_name = excluded.player_name, update_time = excluded.update_time",
+                player_id,
+                player_name,
+                0.0, // Default RKS, will be recalculated if scores exist
+                update_time_str,
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| AppError::DatabaseError(format!("更新玩家信息失败: {}", e)))?;
+            tx.commit().await.map_err(|e| AppError::DatabaseError(format!("提交事务失败: {}", e)))?;
+            return Ok(());
+        }
+        
+        // 开始事务
+        let mut tx = self.pool.begin().await
+            .map_err(|e| AppError::DatabaseError(format!("开始事务失败: {}", e)))?;
+            
+        // 1. 更新或插入玩家信息
+        let update_time = Utc::now();
+        let update_time_str = update_time.to_rfc3339();
+        query!(
+             "INSERT INTO player_archives (player_id, player_name, rks, update_time) VALUES (?, ?, ?, ?) 
+              ON CONFLICT(player_id) DO UPDATE SET player_name = excluded.player_name, update_time = excluded.update_time",
+             player_id,
+             player_name,
+             0.0, // RKS将在后面重新计算
+             update_time_str,
+         )
+         .execute(&mut *tx)
+         .await
+         .map_err(|e| AppError::DatabaseError(format!("更新玩家信息失败: {}", e)))?;
+
+        // 2. 将该玩家所有谱面的 is_current 设为 0
+        // 这样做比逐个更新更高效，即使某些谱面没有新记录
+        query!(
+            "UPDATE chart_scores SET is_current = 0 WHERE player_id = ?",
+            player_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("重置旧成绩状态失败: {}", e)))?;
+
+        // 3. 逐条插入新的当前成绩 (移除 UNNEST 尝试)
+        log::debug!("开始逐条插入 {} 条新成绩记录...", rks_records.len());
         for record in rks_records {
             let key = format!("{}-{}", record.song_id, record.difficulty);
             let is_fc = fc_map.get(&key).copied().unwrap_or(false);
             let is_phi = record.acc >= 100.0;
-            
-            let chart_score = ChartScore {
-                song_id: record.song_id.clone(),
-                song_name: record.song_name.clone(),
-                difficulty: record.difficulty.clone(),
-                difficulty_value: record.difficulty_value,
-                score: record.score.unwrap_or(0.0),
-                acc: record.acc,
-                rks: record.rks,
-                is_fc,
-                is_phi,
-                play_time: Utc::now(),
-            };
-            
-            self.update_player_score(player_id, player_name, chart_score).await?;
+            let is_fc_i32 = is_fc as i32;
+            let is_phi_i32 = is_phi as i32;
+            let play_time_str = update_time.to_rfc3339(); // Use the same transaction start time
+            let score_value = record.score.unwrap_or(0.0); // Store score in a variable
+
+            query!(
+                "INSERT INTO chart_scores (
+                    player_id, song_id, song_name, difficulty, difficulty_value, 
+                    score, acc, rks, is_fc, is_phi, play_time, is_current
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+                player_id, 
+                record.song_id, 
+                record.song_name, 
+                record.difficulty, 
+                record.difficulty_value,
+                score_value, // Use the variable here
+                record.acc, 
+                record.rks, 
+                is_fc_i32,
+                is_phi_i32,
+                play_time_str,
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e_inner| AppError::DatabaseError(format!("插入单条成绩失败 for {}-{}: {}", record.song_id, record.difficulty, e_inner)))?;
+        }
+        log::debug!("逐条插入完成");
+        
+        // 提交事务
+        tx.commit().await
+            .map_err(|e| AppError::DatabaseError(format!("提交事务失败: {}", e)))?;
+        
+        // 4. 在所有数据库操作完成后，计算并更新玩家RKS
+        log::info!("成绩批量更新完成，开始重新计算玩家[{}] ({}) 的 RKS...", player_id, player_name);
+        match self.recalculate_player_rks(player_id).await {
+             Ok(new_rks) => log::info!("玩家[{}] ({}) RKS 更新为: {:.4}", player_id, player_name, new_rks),
+             Err(e) => log::error!("重新计算玩家[{}] ({}) RKS 失败: {}", player_id, player_name, e),
+             // Continue even if RKS recalculation fails
+        }
+        
+        // 5. 计算并更新推分ACC (如果启用)
+        if self.config.store_push_acc {
+             log::info!("开始重新计算玩家[{}] ({}) 的推分 ACC...", player_id, player_name);
+             match self.recalculate_push_acc(player_id).await {
+                 Ok(_) => log::info!("玩家[{}] ({}) 推分 ACC 更新完成", player_id, player_name),
+                 Err(e) => log::error!("重新计算玩家[{}] ({}) 推分 ACC 失败: {}", player_id, player_name, e),
+                 // Continue even if push acc recalculation fails
+             }
+        }
+
+        // 清除缓存
+        {
+            let mut cache = self.cache.lock().unwrap();
+            cache.remove(player_id);
+            log::debug!("玩家[{}] ({}) 缓存已清除", player_id, player_name);
         }
         
         Ok(())
@@ -502,6 +594,52 @@ impl PlayerArchiveService {
         
         Ok(())
     }
+
+    /// 获取RKS排行榜数据
+    pub async fn get_rks_ranking(&self, limit: usize) -> Result<Vec<RKSRankingEntry>, AppError> {
+        log::info!("获取RKS排行榜，显示前{}名玩家", limit);
+
+        let rows = sqlx::query(
+            "SELECT player_id, player_name, rks, update_time 
+             FROM player_archives 
+             ORDER BY rks DESC 
+             LIMIT ?"
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("获取基础排行榜数据失败: {}", e)))?;
+
+        let mut ranking_entries = Vec::with_capacity(rows.len());
+        for row in rows {
+            let player_id: String = row.try_get("player_id")
+                .map_err(|e| AppError::DatabaseError(format!("获取 player_id 失败: {}", e)))?;
+            let player_name: String = row.try_get("player_name")
+                .map_err(|e| AppError::DatabaseError(format!("获取 player_name 失败: {}", e)))?;
+            let rks: f64 = row.try_get("rks")
+                .map_err(|e| AppError::DatabaseError(format!("获取 rks 失败: {}", e)))?;
+            let update_time_str: String = row.try_get("update_time")
+                .map_err(|e| AppError::DatabaseError(format!("获取 update_time 失败: {}", e)))?;
+
+            let update_time = DateTime::parse_from_rfc3339(&update_time_str)
+                .map(|dt| dt.with_timezone(&Utc))
+                .map_err(|e| AppError::InternalError(format!("解析排行榜更新时间失败 ({}): {}", player_id, e)))?;
+
+            ranking_entries.push(RKSRankingEntry {
+                player_id,
+                player_name,
+                rks,
+                update_time,
+                b27_rks: None,
+                ap3_rks: None,
+                ap_count: None,
+            });
+        }
+
+        log::debug!("成功转换{}条排行榜数据", ranking_entries.len());
+
+        Ok(ranking_entries)
+    }
 }
 
 // 数据库模型，用于从数据库查询结果映射
@@ -529,6 +667,15 @@ struct DbChartScoreHistory {
     is_fc: i32,
     is_phi: i32,
     play_time: DateTime<Utc>,
+}
+
+// Temporary struct for querying basic ranking info
+#[derive(sqlx::FromRow, Debug)]
+struct BasicRankingInfo {
+    player_id: String,
+    player_name: String,
+    rks: f64,
+    update_time: String, // Query as String first
 }
 
 // 使用示例

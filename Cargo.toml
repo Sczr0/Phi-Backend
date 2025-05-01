@@ -68,3 +68,7 @@ itertools = "0.14.0"
 
 [features]
 default = []
+
+# 添加 release 配置以包含调试信息
+[profile.release]
+debug = true

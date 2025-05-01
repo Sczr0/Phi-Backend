@@ -28,6 +28,9 @@ pub enum AppError {
     #[error("未找到用户绑定: {0}")]
     UserBindingNotFound(String),
     
+    #[error("未找到用户: {0}")]
+    UserNotFound(String),
+    
     #[error("绑定已存在: {0}")]
     BindingAlreadyExists(String),
     
@@ -113,6 +116,7 @@ impl ResponseError for AppError {
             AppError::SongNotFound(_) => (actix_web::http::StatusCode::NOT_FOUND, "song_not_found"),
             AppError::AmbiguousSongName(_) => (actix_web::http::StatusCode::BAD_REQUEST, "ambiguous_song_name"),
             AppError::UserBindingNotFound(_) => (actix_web::http::StatusCode::NOT_FOUND, "user_binding_not_found"),
+            AppError::UserNotFound(_) => (actix_web::http::StatusCode::NOT_FOUND, "user_not_found"),
             AppError::BindingAlreadyExists(_) => (actix_web::http::StatusCode::CONFLICT, "binding_already_exists"),
             AppError::ProfileVerificationFailed(_) => (actix_web::http::StatusCode::BAD_REQUEST, "profile_verification_failed"),
             AppError::TokenVerificationFailed(_) => (actix_web::http::StatusCode::UNAUTHORIZED, "token_verification_failed"),

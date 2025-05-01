@@ -1,15 +1,21 @@
 use actix_web::{post, get, web, HttpResponse, Result};
+use serde::{Deserialize, Serialize};
 use crate::models::user::IdentifierRequest;
 use crate::services::image_service;
 use crate::services::phigros::PhigrosService;
 use crate::services::user::UserService;
 use crate::services::song::SongService;
+use crate::services::player_archive_service::PlayerArchiveService;
 use crate::utils::error::AppError;
-use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
 pub struct SongImageQuery {
     q: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LeaderboardQuery {
+    pub limit: Option<usize>,
 }
 
 #[post("/bn/{n}")]
@@ -17,7 +23,8 @@ pub async fn generate_bn_image(
     path: web::Path<u32>,
     req: web::Json<IdentifierRequest>,
     phigros_service: web::Data<PhigrosService>,
-    user_service: web::Data<UserService>
+    user_service: web::Data<UserService>,
+    player_archive_service: web::Data<PlayerArchiveService>,
 ) -> Result<HttpResponse, AppError> {
     let n = path.into_inner();
     
@@ -29,7 +36,13 @@ pub async fn generate_bn_image(
     let identifier = req.into_inner();
     
     // 调用服务时传递注入的服务实例
-    let image_bytes = image_service::generate_bn_image(n, identifier, phigros_service, user_service).await?;
+    let image_bytes = image_service::generate_bn_image(
+        n, 
+        identifier, 
+        phigros_service, 
+        user_service, 
+        player_archive_service
+    ).await?;
 
     Ok(HttpResponse::Ok()
         .content_type("image/png")
@@ -43,6 +56,7 @@ pub async fn generate_song_image(
     phigros_service: web::Data<PhigrosService>,
     user_service: web::Data<UserService>,
     song_service: web::Data<SongService>,
+    player_archive_service: web::Data<PlayerArchiveService>,
 ) -> Result<HttpResponse, AppError> {
     let song_query = query.into_inner().q;
     let identifier = req.into_inner();
@@ -54,10 +68,28 @@ pub async fn generate_song_image(
         phigros_service,
         user_service,
         song_service,
+        player_archive_service
     )
     .await?;
 
     Ok(HttpResponse::Ok()
         .content_type("image/png")
         .body(image_bytes))
+}
+
+/// RKS排行榜图片
+#[get("/leaderboard/rks")]
+pub async fn get_rks_leaderboard(
+    query: web::Query<LeaderboardQuery>,
+    player_archive_service: web::Data<PlayerArchiveService>,
+) -> Result<HttpResponse, AppError> {
+    let result = image_service::generate_rks_leaderboard_image(
+        query.limit,
+        player_archive_service,
+    )
+    .await?;
+
+    Ok(HttpResponse::Ok()
+        .content_type("image/png")
+        .body(result))
 } 
