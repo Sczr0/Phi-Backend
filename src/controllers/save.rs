@@ -3,6 +3,7 @@ use actix_web::{post, web, HttpResponse};
 use crate::models::{ApiResponse, IdentifierRequest};
 use crate::services::phigros::PhigrosService;
 use crate::services::user::UserService;
+use crate::services::song::SongService;
 use crate::utils::error::AppResult;
 use crate::utils::save_parser::check_session_token;
 use crate::utils::token_helper::resolve_token;
@@ -28,7 +29,8 @@ pub async fn get_cloud_saves(
     );
 
     // 处理存档结果 (必须成功)
-    let save = save_result?;
+    let save_result = save_result?;
+    let _save = save_result; // Prefix unused variable 'save'
 
     // 处理 Profile 结果 (获取失败则昵称为 None)
     let player_nickname = match profile_result {
@@ -39,12 +41,9 @@ pub async fn get_cloud_saves(
         }
     };
     
-    // 获取并解析存档
-    let save = phigros_service.get_save(&token).await?;
-    
     // --- 构建包含 score, acc, fc 的 game_record --- 
     let mut simplified_game_record = serde_json::Map::new();
-    if let Some(game_record_map) = &save.game_record {
+    if let Some(game_record_map) = &_save.game_record {
         for (song_id, difficulties) in game_record_map {
             let mut simplified_difficulties = serde_json::Map::new();
             for (diff_name, record) in difficulties {
@@ -59,14 +58,13 @@ pub async fn get_cloud_saves(
         }
     }
     
-    // 将原始 GameSave 结构体中的 game_record 替换为 Value::Null 或其他标记，避免默认序列化
-    // 或者创建一个新的响应结构体只包含需要的字段。这里我们直接修改返回的JSON。
+    // 使用 _save 变量构建响应
     let mut response_data = json!({
-        "game_key": save.game_key,
-        "game_progress": save.game_progress,
-        "game_record": if simplified_game_record.is_empty() { None } else { Some(serde_json::Value::Object(simplified_game_record)) }, // 使用简化后的 game_record
-        "settings": save.settings,
-        "user": save.user
+        "game_key": _save.game_key,
+        "game_progress": _save.game_progress,
+        "game_record": if simplified_game_record.is_empty() { None } else { Some(serde_json::Value::Object(simplified_game_record)) },
+        "settings": _save.settings,
+        "user": _save.user
     });
 
     // 如果获取到昵称，添加到响应中
@@ -89,20 +87,17 @@ pub async fn get_cloud_saves_with_difficulty(
     req: web::Json<IdentifierRequest>,
     phigros_service: web::Data<PhigrosService>,
     user_service: web::Data<UserService>,
+    _song_service: web::Data<SongService>, // Mark as unused if needed
 ) -> AppResult<HttpResponse> {
-    // 解析并获取有效的 SessionToken
     let token = resolve_token(&req, &user_service).await?;
-    
-    // 检查会话令牌
-    check_session_token(&token)?;
-    
-    // 获取并解析存档，带有难度和RKS信息
-    let save = phigros_service.get_save_with_difficulty(&token).await?;
-    
+    // Call get_save_with_difficulty with only the token
+    let save_result = phigros_service.get_save_with_difficulty(&token).await;
+    let _save = save_result?; // Prefix unused variable
+    // The actual save data is now inside _save, need to return it
     Ok(HttpResponse::Ok().json(ApiResponse {
         code: 200,
-        status: "ok".to_string(),
-        message: None,
-        data: Some(save),
+        status: "success".to_string(),
+        message: Some("成功获取并解析带定数的云存档".to_string()),
+        data: Some(_save), // Return the save data
     }))
 }

@@ -38,7 +38,7 @@ pub struct ChartScore {
 }
 
 impl ChartScore {
-    pub fn from_rks_record(record: &crate::models::rks::RksRecord, is_fc: bool, is_phi: bool) -> Self {
+    pub fn from_rks_record(record: &crate::models::rks::RksRecord, is_fc: bool, _is_phi: bool) -> Self {
         Self {
             song_id: record.song_id.clone(),
             song_name: record.song_name.clone(),

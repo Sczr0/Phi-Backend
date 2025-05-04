@@ -3,12 +3,13 @@ use log::debug;
 use serde::Deserialize;
 use std::collections::HashMap;
 
-use crate::models::{ApiResponse, user::IdentifierRequest, SongRecord, SongInfo};
+use crate::models::{ApiResponse, user::IdentifierRequest, /*SongRecord,*/ SongInfo, PredictionResponse};
 use crate::services::phigros::PhigrosService;
 use crate::services::song::SongService;
 use crate::services::user::UserService;
 use crate::utils::error::{AppResult, AppError};
 use crate::utils::token_helper::resolve_token;
+use crate::utils::data_loader::get_predicted_constant;
 
 /// 搜索歌曲信息 (推荐)
 #[get("/song/search")]
@@ -146,5 +147,64 @@ pub async fn get_song_record(
         status: "OK".to_string(),
         message: None,
         data: Some(song_records),
+    }))
+}
+
+/// 搜索歌曲预测常数
+#[get("/song/search/predictions")]
+pub async fn search_song_predictions(
+    query: web::Query<HashMap<String, String>>,
+    song_service: web::Data<SongService>,
+) -> AppResult<HttpResponse> {
+    // 获取查询参数
+    let q = query.get("q").ok_or_else(|| {
+        crate::utils::error::AppError::BadRequest("缺少查询参数q".to_string())
+    })?;
+    
+    // 获取难度参数，默认为所有难度
+    let difficulty = query.get("difficulty").map(|s| s.as_str());
+    
+    debug!("接收到歌曲预测常数搜索请求: q={}, difficulty={:?}", q, difficulty);
+    
+    // 获取歌曲ID
+    let song_id = song_service.get_song_id(q)?;
+    
+    // 根据难度获取预测常数
+    let result = match difficulty {
+        Some(diff) => {
+            // 返回特定难度的预测常数
+            let predicted_constant = get_predicted_constant(&song_id, diff);
+            
+            vec![PredictionResponse {
+                song_id: song_id.clone(),
+                difficulty: diff.to_string(),
+                predicted_constant,
+            }]
+        },
+        None => {
+            // 返回所有难度的预测常数
+            let difficulties = vec!["EZ", "HD", "IN", "AT"];
+            let mut results = Vec::new();
+            
+            for diff in difficulties {
+                let predicted_constant = get_predicted_constant(&song_id, diff);
+                
+                results.push(PredictionResponse {
+                    song_id: song_id.clone(),
+                    difficulty: diff.to_string(),
+                    predicted_constant,
+                });
+            }
+            
+            results
+        }
+    };
+    
+    // 返回成功响应
+    Ok(HttpResponse::Ok().json(ApiResponse {
+        code: 200,
+        status: "OK".to_string(),
+        message: None,
+        data: Some(result),
     }))
 } 

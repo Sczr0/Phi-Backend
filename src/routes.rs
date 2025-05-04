@@ -18,6 +18,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         // Song Search (Recommended)
         .service(controllers::search_song)     // GET /song/search
         .service(controllers::search_song_record) // POST /song/search/record
+        .service(controllers::search_song_predictions) // GET /song/search/predictions
         // Song Search (Old/Compatible)
         .service(controllers::get_song_info)   // GET /song/info
         .service(controllers::get_song_record); // POST /song/record

@@ -3,7 +3,6 @@ use crate::utils::error::{AppError, AppResult};
 use sqlx::SqlitePool;
 use chrono::{Duration, Utc};
 use rand::{distributions::Alphanumeric, Rng};
-use uuid::Uuid;
 
 // 用户服务，管理内部ID和平台绑定关系
 #[derive(Clone)]

@@ -2,7 +2,7 @@ use actix_cors::Cors;
 use actix_web::{middleware, web, App, HttpServer};
 use dotenv::dotenv;
 use env_logger::Env;
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions, SqliteConnectOptions};
+use sqlx::sqlite::{SqlitePoolOptions, SqliteConnectOptions};
 use std::env;
 use std::str::FromStr;
 

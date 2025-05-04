@@ -2,7 +2,7 @@ use actix_web::{post, web, HttpResponse};
 use chrono::Utc;
 use serde_json::json;
 
-use crate::models::{ApiResponse, BindRequest, IdentifierRequest, PlatformBinding, TokenListResponse, UnbindInitiateResponse};
+use crate::models::{ApiResponse, BindRequest, IdentifierRequest, PlatformBinding, /* TokenListResponse, */ UnbindInitiateResponse};
 use crate::services::phigros::PhigrosService;
 use crate::services::user::UserService;
 use crate::utils::error::{AppError, AppResult};

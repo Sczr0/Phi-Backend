@@ -1,5 +1,5 @@
-use crate::models::user::IdentifierRequest;
 use crate::models::rks::RksRecord;
+use crate::models::IdentifierRequest;
 use crate::services::phigros::PhigrosService;
 use crate::services::user::UserService;
 use crate::services::song::SongService;
@@ -10,11 +10,11 @@ use chrono::Utc;
 use actix_web::web;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use itertools::Itertools;
 use tokio;
 use std::path::PathBuf;
 use crate::services::player_archive_service::PlayerArchiveService;
 use crate::utils::image_renderer::LeaderboardRenderData;
+use crate::utils::token_helper::resolve_token;
 
 // --- RKS 计算辅助函数 ---
 
@@ -146,13 +146,13 @@ fn simulate_rks_increase(
 
     let mut current_b27_sum = precalculated.b27_sum;
     let mut current_ap3_sum = precalculated.ap3_sum;
-    let mut simulated_ap_records = precalculated.ap_records_sorted_by_rks.clone();
+    let mut _simulated_ap_records = precalculated.ap_records_sorted_by_rks.clone(); // Prefix unused mutable variable
 
     // 查找原记录信息
     let original_record_opt = all_sorted_records.iter()
         .find(|r| r.song_id == song_id && r.difficulty == difficulty);
 
-    let original_rks = original_record_opt.map_or(0.0, |r| r.rks);
+    let _original_rks = original_record_opt.map_or(0.0, |r| r.rks); // Prefix unused variable
     let original_is_ap = original_record_opt.map_or(false, |r| r.acc >= 100.0);
 
     // --- 模拟 B27 更新 ---
@@ -388,17 +388,13 @@ pub fn calculate_target_chart_push_acc(
 
 pub async fn generate_bn_image(
     n: u32, 
-    identifier: IdentifierRequest, 
+    identifier: web::Json<IdentifierRequest>, // Use web::Json for consistency
     phigros_service: web::Data<PhigrosService>,
     user_service: web::Data<UserService>,
     player_archive_service: web::Data<PlayerArchiveService>,
 ) -> Result<Vec<u8>, AppError> {
-    // 获取 token (从QQ或直接使用token)
-    let token = match (identifier.token, identifier.qq) {
-        (Some(token), _) => token,
-        (_, Some(qq)) => user_service.get_user_by_qq(&qq).await?.session_token,
-        _ => return Err(AppError::BadRequest("必须提供token或QQ".to_string())),
-    };
+    // 使用辅助函数解析 Token
+    let token = resolve_token(&identifier, &user_service).await?;
     
     // (优化后) 并行获取 RKS列表+存档 和 Profile
     let (rks_save_res, profile_res) = tokio::join!(
@@ -524,12 +520,12 @@ pub async fn generate_bn_image(
     // 将 SVG 生成和渲染都移到 blocking task 中
     let png_data = web::block(move || {
         // SVG 生成，返回 Result<String, AppError>
-        let svg_string = image_renderer::generate_svg_string(&top_n_scores, &stats, Some(&push_acc_map))?;
+    let svg_string = image_renderer::generate_svg_string(&top_n_scores, &stats, Some(&push_acc_map))?;
 
         // 渲染 SVG 到 PNG，返回 Result<Vec<u8>, AppError>
         image_renderer::render_svg_to_png(svg_string)
     })
-    .await
+        .await
     // 处理 web::block 的 JoinError
     .map_err(|e| AppError::InternalError(format!("Blocking task join error: {}", e)))
     // 解开 Result<Result<Vec<u8>, AppError>, AppError> 为 Result<Vec<u8>, AppError>
@@ -541,18 +537,14 @@ pub async fn generate_bn_image(
 // 新增：生成单曲成绩图片的服务逻辑
 pub async fn generate_song_image_service(
     song_query: String,
-    identifier: IdentifierRequest,
+    identifier: web::Json<IdentifierRequest>, // Use web::Json for consistency
     phigros_service: web::Data<PhigrosService>,
     user_service: web::Data<UserService>,
     song_service: web::Data<SongService>,
     player_archive_service: web::Data<PlayerArchiveService>,
 ) -> Result<Vec<u8>, AppError> {
-    // 1. 解析获取有效的 SessionToken
-    let token = match (identifier.token, identifier.qq) {
-        (Some(token), _) => token,
-        (_, Some(qq)) => user_service.get_user_by_qq(&qq).await?.session_token,
-        _ => return Err(AppError::BadRequest("必须提供token或QQ".to_string())),
-    };
+    // 使用辅助函数解析 Token
+    let token = resolve_token(&identifier, &user_service).await?;
 
     // 2. 查询歌曲信息 (获取 ID, 名称)
     let song_info = song_service.search_song(&song_query)?;
@@ -711,7 +703,7 @@ pub async fn generate_song_image_service(
     // 将 SVG 生成和渲染都移到 blocking task 中
     let png_data = web::block(move || {
         // SVG 生成，返回 Result<String, AppError>
-        let svg_string = image_renderer::generate_song_svg_string(&render_data)?;
+    let svg_string = image_renderer::generate_song_svg_string(&render_data)?;
         // 渲染 SVG 到 PNG，返回 Result<Vec<u8>, AppError>
         image_renderer::render_svg_to_png(svg_string)
     })

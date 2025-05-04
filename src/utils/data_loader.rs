@@ -4,10 +4,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::env; // 导入 env 模块
+use serde::Deserialize; // 导入 Deserialize 宏
 
 // 不再需要导入 CONFIG
 // use crate::config::CONFIG; 
-use crate::models::{SongDifficulty, SongInfo, NicknameMap};
+use crate::models::{SongDifficulty, SongInfo, NicknameMap, PredictedConstants /*, PredictionResponse*/};
 use crate::utils::error::AppResult;
 
 // --- 辅助函数：从环境变量获取路径，如果未设置则使用默认值 ---
@@ -37,6 +38,10 @@ lazy_static! {
     );
     static ref NICKLIST_FILE_PATH: PathBuf = INFO_DATA_PATH_BUF.join(
         env::var("NICKLIST_FILE").unwrap_or_else(|_| "nicklist.yaml".to_string())
+    );
+    // 预测常数文件路径
+    static ref PREDICTIONS_FILE_PATH: PathBuf = INFO_DATA_PATH_BUF.join(
+        env::var("PREDICTIONS_FILE").unwrap_or_else(|_| "chart_predictions_wide.csv".to_string())
     );
 
     pub static ref SONG_INFO: Arc<Vec<SongInfo>> = Arc::new({
@@ -103,6 +108,29 @@ lazy_static! {
         log::info!("已创建 ID->难度 映射，共 {} 条", map.len());
         map
     });
+    // 预测常数数据
+    pub static ref PREDICTED_CONSTANTS: Arc<HashMap<String, PredictedConstants>> = Arc::new({
+        match load_predicted_constants(&PREDICTIONS_FILE_PATH) {
+            Ok(predictions) => {
+                log::info!("已加载 {} 条预测常数数据", predictions.len());
+                predictions
+            }
+            Err(e) => {
+                log::error!("加载预测常数数据失败: {}", e);
+                HashMap::new()
+            }
+        }
+    });
+}
+
+// 临时的结构体，用于从CSV反序列化预测常数数据
+#[derive(Deserialize)]
+struct PredictedConstantRecord {
+    song_id: String,
+    ez: Option<f32>,
+    hd: Option<f32>,
+    inl: Option<f32>,
+    at: Option<f32>,
 }
 
 // 加载歌曲信息 - 修改为接受 Path 参数
@@ -160,7 +188,45 @@ fn load_song_nicknames(path: &Path) -> AppResult<NicknameMap> {
     Ok(nicknames)
 }
 
-// ... (其他函数 get_song_name_by_id 等保持不变) ...
+// 加载预测常数数据
+fn load_predicted_constants(path: &Path) -> AppResult<HashMap<String, PredictedConstants>> {
+    log::debug!("正在加载预测常数数据，路径: {}", path.display());
+    
+    // 检查文件是否存在
+    if !path.exists() {
+        log::warn!("预测常数文件不存在: {}", path.display());
+        return Ok(HashMap::new());
+    }
+    
+    let mut rdr = csv::Reader::from_path(path)?;
+    let mut predictions = HashMap::new();
+    
+    for (index, result) in rdr.deserialize().enumerate() {
+        let line_num = index + 2; // +1 for header, +1 for 1-based index
+        match result {
+            Ok(record) => {
+                // 反序列化到临时结构体
+                let prediction_record: PredictedConstantRecord = record;
+                // 创建 PredictedConstants 实例作为 Value
+                let constants = PredictedConstants {
+                    ez: prediction_record.ez,
+                    hd: prediction_record.hd,
+                    inl: prediction_record.inl,
+                    at: prediction_record.at,
+                };
+                // 使用临时结构体中的 song_id 作为 Key
+                predictions.insert(prediction_record.song_id, constants);
+            }
+            Err(e) => {
+                log::error!("解析预测常数数据第 {} 行失败: {}", line_num, e);
+            }
+        }
+    }
+    
+    log::debug!("预测常数数据加载完成，共 {} 条", predictions.len());
+    Ok(predictions)
+}
+
 // 根据歌曲ID查找歌曲名称
 pub fn get_song_name_by_id(id: &str) -> Option<String> {
     let result = SONG_ID_TO_NAME.get(id).cloned();
@@ -206,4 +272,18 @@ pub fn get_difficulty_by_id(id: &str, difficulty_level: &str) -> Option<f64> {
     }
     
     result
+}
+
+// 根据歌曲ID和难度级别获取预测常数
+pub fn get_predicted_constant(id: &str, difficulty_level: &str) -> Option<f32> {
+    PREDICTED_CONSTANTS.get(id).and_then(|p| match difficulty_level {
+        "EZ" => p.ez,
+        "HD" => p.hd,
+        "IN" => p.inl,
+        "AT" => p.at,
+        _ => {
+            log::warn!("获取预测常数时遇到未知的难度级别: {} (歌曲ID: {})", difficulty_level, id);
+            None
+        }
+    })
 }

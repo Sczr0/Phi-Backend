@@ -8,7 +8,7 @@ use sqlx::{SqlitePool, query, query_as};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use log;
-use sqlx::{Sqlite, Row};
+use sqlx::Row;
 
 #[derive(Clone)]
 pub struct PlayerArchiveService {
@@ -343,8 +343,8 @@ impl PlayerArchiveService {
         &self, 
         player_id: &str, 
         player_name: &str,
-        rks_records: &[RksRecord],
-        fc_map: &HashMap<String, bool>, // 谱面ID-难度 -> 是否FC
+        rks_records: &Vec<RksRecord>,
+        fc_map: &HashMap<String, bool>,
     ) -> Result<(), AppError> {
         log::info!("批量更新玩家[{}] ({}) 的成绩, 共{}条记录", player_id, player_name, rks_records.len());
         
@@ -470,7 +470,7 @@ impl PlayerArchiveService {
         log::info!("重新计算玩家[{}]推分ACC", player_id);
         
         // 获取玩家存档
-        let archive = self.get_player_archive(player_id).await?
+        let _archive = self.get_player_archive(player_id).await?
             .ok_or_else(|| AppError::DatabaseError(format!("玩家不存在: {}", player_id)))?;
         
         // 获取所有当前成绩用于推分计算
@@ -639,6 +639,39 @@ impl PlayerArchiveService {
         log::debug!("成功转换{}条排行榜数据", ranking_entries.len());
 
         Ok(ranking_entries)
+    }
+
+    pub async fn get_player_best_scores(
+        &self,
+        player_id: &str,
+        _n: Option<usize>,
+    ) -> Result<Vec<ChartScore>, AppError> {
+        let _archive = self.get_player_archive(player_id).await?;
+        // ... rest of the function ...
+        let scores = query_as::<_, DbChartScore>(
+            "SELECT song_id, song_name, difficulty, difficulty_value, score, acc, rks, is_fc, is_phi, play_time 
+             FROM chart_scores 
+             WHERE player_id = ? AND is_current = 1"
+        )
+        .bind(player_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("查询成绩失败: {}", e)))?;
+
+        let result_scores = scores.into_iter().map(|db_score| ChartScore {
+            song_id: db_score.song_id,
+            song_name: db_score.song_name,
+            difficulty: db_score.difficulty,
+            difficulty_value: db_score.difficulty_value,
+            score: db_score.score,
+            acc: db_score.acc,
+            rks: db_score.rks,
+            is_fc: db_score.is_fc != 0,
+            is_phi: db_score.is_phi != 0,
+            play_time: db_score.play_time,
+        }).collect();
+        
+        Ok(result_scores)
     }
 }
 

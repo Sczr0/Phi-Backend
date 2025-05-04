@@ -6,13 +6,12 @@ use resvg::{render, tiny_skia::{Pixmap, Transform}};
 use std::path::{PathBuf, Path}; // Ensure Path is imported
 use std::rc::Rc;
 // 确保导入了 FixedOffset 和 TimeZone
-use chrono::{DateTime, Utc, FixedOffset, TimeZone};
+use chrono::{DateTime, Utc, FixedOffset/*, TimeZone*/};
 use std::fmt::Write;
 use std::collections::{HashMap, HashSet}; // 导入 HashMap
-use itertools::Itertools;
+// use itertools::Itertools; // Remove unused import
 use std::fs;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added
-use std::env; // Added for potential future use, though not directly in this edit
 // 导入 rand 相关
 use rand::seq::SliceRandom;
 use rand::thread_rng;
@@ -226,7 +225,7 @@ pub fn generate_svg_string(
     // ... (width, height calculations etc. - keep these as they were) ...
     let width = 1200;
     let header_height = 120;
-    let ap_title_height = 50; // Height for the "AP Top 3" title
+    let _ap_title_height = 50; // Prefix unused variable
     let footer_height = 50;
     let main_card_padding_outer = 12;
     let ap_card_padding_outer = 12;
@@ -258,8 +257,8 @@ pub fn generate_svg_string(
     let fmt_err = |e| AppError::InternalError(format!("SVG formatting error: {}", e));
 
     // --- 获取随机背景图 ---
-    let mut background_fill = "url(#bg-gradient)".to_string(); // Default to gradient
     let mut background_image_href = None;
+    let _background_fill = "url(#bg-gradient)".to_string(); // Prefix unused variable
 
     let cover_base_path = PathBuf::from(cover_loader::COVERS_DIR).join("ill"); // 指向 ill 目录
     let cover_files: Vec<PathBuf> = match fs::read_dir(&cover_base_path) {
@@ -286,7 +285,6 @@ pub fn generate_svg_string(
                     };
                     let base64_encoded = base64_engine.encode(&data); // Base64 编码
                     background_image_href = Some(format!("data:{};base64,{}", mime_type, base64_encoded));
-                    background_fill = "none".to_string(); // 如果有图，背景 rect 不需要填充
                     log::info!("使用随机背景图: {}", random_path.display());
                 }
                 Err(e) => {
@@ -636,8 +634,7 @@ pub fn generate_song_svg_string(
     // 曲目名称区域高度
     let song_name_height = 50.0;
     
-    // 难度定数区域高度
-    let difficulty_info_height = 40.0;
+    let _difficulty_info_height = 40.0; // Prefix unused variable
     
     // 成绩卡尺寸 - 调整为与曲绘总高度一致
     let card_area_width = width as f64 - illust_width - padding * 3.0;

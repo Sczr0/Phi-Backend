@@ -1,5 +1,5 @@
 use actix_web::{post, get, web, HttpResponse, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize/*, Serialize*/};
 use crate::models::user::IdentifierRequest;
 use crate::services::image_service;
 use crate::services::phigros::PhigrosService;
@@ -33,12 +33,12 @@ pub async fn generate_bn_image(
         return Err(AppError::BadRequest("N must be greater than 0".to_string()));
     }
 
-    let identifier = req.into_inner();
+    // let identifier = req.into_inner(); // Remove this line
     
-    // 调用服务时传递注入的服务实例
+    // 调用服务时传递注入的服务实例，直接传递 req
     let image_bytes = image_service::generate_bn_image(
         n, 
-        identifier, 
+        req, // Pass req directly
         phigros_service, 
         user_service, 
         player_archive_service
@@ -59,12 +59,12 @@ pub async fn generate_song_image(
     player_archive_service: web::Data<PlayerArchiveService>,
 ) -> Result<HttpResponse, AppError> {
     let song_query = query.into_inner().q;
-    let identifier = req.into_inner();
+    // let identifier = req.into_inner(); // Remove this line
 
-    // 调用新的服务函数来生成图片
+    // 调用新的服务函数来生成图片，直接传递 req
     let image_bytes = image_service::generate_song_image_service(
         song_query,
-        identifier,
+        req, // Pass req directly
         phigros_service,
         user_service,
         song_service,
