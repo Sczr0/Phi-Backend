@@ -1,0 +1,146 @@
+name: Auto Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  build-and-release:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            binary_name: phi-backend-rust
+            target: x86_64-unknown-linux-gnu
+            asset_name: phi-backend-rust-linux-x64
+          - os: windows-latest
+            binary_name: phi-backend-rust.exe
+            target: x86_64-pc-windows-msvc
+            asset_name: phi-backend-rust-windows-x64
+          - os: macos-latest
+            binary_name: phi-backend-rust
+            target: x86_64-apple-darwin
+            asset_name: phi-backend-rust-macos-x64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libssl-dev build-essential
+
+    - name: Build binary
+      run: |
+        cargo build --release --target ${{ matrix.target }}
+
+    - name: Prepare release directory
+      run: |
+        mkdir -p release-package
+
+    - name: Copy binary (Linux/macOS)
+      if: matrix.os != 'windows-latest'
+      run: |
+        cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} release-package/
+
+    - name: Copy binary (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} release-package/
+
+    - name: Copy info folder
+      run: |
+        cp -r info release-package/
+
+    - name: Copy resources folder
+      run: |
+        cp -r resources release-package/
+
+    - name: Create zip archive (Linux/macOS)
+      if: matrix.os != 'windows-latest'
+      run: |
+        cd release-package
+        zip -r ../${{ matrix.asset_name }}.zip .
+
+    - name: Create zip archive (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        cd release-package
+        7z a ../${{ matrix.asset_name }}.zip *
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.asset_name }}-zip
+        path: ${{ matrix.asset_name }}.zip
+
+  create-release:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: artifacts
+
+    - name: Get tag info
+      id: tag_info
+      run: |
+        TAG_NAME=${{ github.ref_name }}
+        echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+        echo "tag_message=$(git tag -l --format='%(contents)' $TAG_NAME)" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.tag_info.outputs.tag_name }}
+        name: Release ${{ steps.tag_info.outputs.tag_name }}
+        body: |
+          ## Release ${{ steps.tag_info.outputs.tag_name }}
+          
+          ${{ steps.tag_info.outputs.tag_message }}
+          
+          ### 包含内容：
+          - phi-backend-rust 二进制文件
+          - info/ 文件夹
+          - resources/ 文件夹
+          
+          ### 安装说明：
+          1. 下载对应平台的压缩包
+          2. 解压到目标目录
+          3. 运行二进制文件
+        files: |
+          artifacts/*-zip/*.zip
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
