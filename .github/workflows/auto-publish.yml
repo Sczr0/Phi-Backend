@@ -49,19 +49,18 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --target ${{ matrix.job.target }}
-          use-cross: ${{ matrix.job.use-cross }}
+          args: --release --target ${{ matrix.target }}
 
       - name: Package as a release asset
         shell: bash
         run: |
-          PKG_BASENAME=phi-backend-rust-${{ env.VERSION }}-${{ matrix.job.target }}
+          PKG_BASENAME=phi-backend-rust-${{ env.VERSION }}-${{ matrix.target }}
           PKG_NAME=${PKG_BASENAME}.tar.gz
-          ASSET_PATH=target/${{ matrix.job.target }}/release/
+          ASSET_PATH=target/${{ matrix.target }}/release/
           BINARY_NAME=phi-backend-rust
           
           # For Windows, change binary extension
-          if [[ ${{ matrix.job.target }} == *windows* ]]; then
+          if [[ ${{ matrix.target }} == *windows* ]]; then
             BINARY_NAME=phi-backend-rust.exe
           fi
           
