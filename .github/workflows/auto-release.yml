@@ -51,7 +51,19 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y pkg-config libssl-dev build-essential
 
+    - name: Install OpenSSL (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install openssl@3
+        echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
+        echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> $GITHUB_ENV
+        echo "LIBRARY_PATH=$(brew --prefix openssl@3)/lib" >> $GITHUB_ENV
+
     - name: Build binary
+      env:
+        OPENSSL_DIR: ${{ env.OPENSSL_DIR }}
+        PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
+        LIBRARY_PATH: ${{ env.LIBRARY_PATH }}
       run: |
         cargo build --release --target ${{ matrix.target }}
 
