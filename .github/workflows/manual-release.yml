@@ -6,48 +6,22 @@ on:
       version:
         description: 'Version to release (e.g., 1.2.3)'
         required: true
-      release_type:
-        description: 'Release type'
-        required: true
-        type: choice
-        options:
-          - 'release'
-          - 'prerelease'
-        default: 'release'
+
+# 添加权限配置
+permissions:
+  contents: write
 
 jobs:
-  release:
+  create-release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Validate version format
+      - name: Create tag
         run: |
-          if [[ ! "${{ github.event.inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid version format. Please use format: X.Y.Z (e.g., 1.2.3)"
-            exit 1
-          fi
-
-      - name: Update version in Cargo.toml
-        run: |
-          sed -i "s/version = \".*\"/version = \"${{ github.event.inputs.version }}\"/" Cargo.toml
-
-      - name: Commit version update
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add Cargo.toml
-          git commit -m "Update to version ${{ github.event.inputs.version }}"
-
-      - name: Push changes
-        run: |
-          git push
-
-      - name: Create Git tag
-        run: |
-          git tag v${{ github.event.inputs.version }}
-          git push origin v${{ github.event.inputs.version }}
+          git tag -a "v${{ github.event.inputs.version }}" -m "Release version ${{ github.event.inputs.version }}"
+          git push origin "v${{ github.event.inputs.version }}"
 
       - name: Create Release
         id: create_release
@@ -55,7 +29,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v${{ github.event.inputs.version }}
-          release_name: Release ${{ github.event.inputs.version }}
+          tag_name: "v${{ github.event.inputs.version }}"
+          release_name: "Release ${{ github.event.inputs.version }}"
+          body: |
+            ## Changes in this release
+            
+            - Version ${{ github.event.inputs.version }} released
+            
+            See commit history for a full list of changes.
           draft: false
-          prerelease: ${{ github.event.inputs.release_type == 'prerelease' }}
+          prerelease: false

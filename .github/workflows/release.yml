@@ -3,8 +3,11 @@ name: Release
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v*'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   create-release:
@@ -24,8 +27,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v${{ env.VERSION }}
-          release_name: Release v${{ env.VERSION }}
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ env.VERSION }}
+          body: |
+            ## Changes in this release
+            
+            - Version bumped to ${{ env.VERSION }}
+            
+            See commit history for a full list of changes.
           draft: false
           prerelease: false
 
