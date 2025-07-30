@@ -1,4 +1,4 @@
-name: Simple Publish
+name: Auto Publish
 
 on:
   push:
@@ -9,6 +9,9 @@ jobs:
   publish:
     name: Publish for ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+      deployments: write
     strategy:
       matrix:
         include:
@@ -18,112 +21,6 @@ jobs:
             target: x86_64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-
-    steps:
-      - name: Get the release version from the tag
-        shell: bash
-        run: |
-          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-          echo "STRIPPED_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
-
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-          profile: minimal
-          override: true
-
-      - name: Build target
-        run: |
-          cargo build --release --target ${{ matrix.target }}
-
-      - name: Package as a release asset (Unix)
-        if: matrix.os != 'windows-latest'
-        shell: bash
-        run: |
-          PKG_NAME=phi-backend-rust-v${{ env.STRIPPED_VERSION }}-${{ matrix.target }}.tar.gz
-          tar -czf ${PKG_NAME} -C target/${{ matrix.target }}/release phi-backend-rust
-          echo "PKG_NAME=${PKG_NAME}" >> $GITHUB_ENV
-
-      - name: Package as a release asset (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: bash
-        run: |
-          PKG_NAME=phi-backend-rust-v${{ env.STRIPPED_VERSION }}-${{ matrix.target }}.tar.gz
-          tar -czf ${PKG_NAME} -C target/${{ matrix.target }}/release phi-backend-rust.exe
-          echo "PKG_NAME=${PKG_NAME}" >> $GITHUB_ENV
-
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ env.STRIPPED_VERSION }}
-          release_name: Release v${{ env.STRIPPED_VERSION }}
-          draft: false
-          prerelease: false
-
-      - name: Upload release asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./${{ env.PKG_NAME }}
-          asset_name: ${{ env.PKG_NAME }}
-          asset_content_type: application/gzip
-name: Auto Publish
-
-on:
-  push:
-    tags:
-      - "v*.*.*"
-
-jobs:
-  get-release:
-    name: Get Release Info
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.get_upload_url.outputs.upload_url }}
-      release_id: ${{ steps.get_release_id.outputs.release_id }}
-    steps:
-      - name: Get the release version from the tag
-        shell: bash
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-
-      - name: Get release upload URL
-        id: get_upload_url
-        run: |
-          UPLOAD_URL=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ env.VERSION }}" \
-            | jq -r ".upload_url")
-          echo "upload_url=$UPLOAD_URL" >> $GITHUB_OUTPUT
-
-      - name: Get release ID
-        id: get_release_id
-        run: |
-          RELEASE_ID=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ env.VERSION }}" \
-            | jq -r ".id")
-          echo "release_id=$RELEASE_ID" >> $GITHUB_OUTPUT
-
-  publish:
-    name: Publish for ${{ matrix.job.target }}
-    runs-on: ${{ matrix.job.os }}
-    needs: get-release
-    strategy:
-      matrix:
-        job:
-          - { target: x86_64-unknown-linux-gnu,      os: ubuntu-20.04, use-cross: true }
-          - { target: x86_64-unknown-linux-musl,     os: ubuntu-20.04, use-cross: true }
-          - { target: x86_64-apple-darwin,           os: macos-latest, use-cross: false }
-          - { target: x86_64-pc-windows-gnu,         os: windows-2019, use-cross: false }
-          - { target: x86_64-pc-windows-msvc,        os: windows-2019, use-cross: false }
 
     steps:
       - name: Get the release version from the tag
