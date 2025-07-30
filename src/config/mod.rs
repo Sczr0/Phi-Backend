@@ -12,6 +12,10 @@ pub struct AppConfig {
     pub difficulty_file: String,
     pub info_file: String,
     pub nicklist_file: String,
+    pub taptap_client_id: String,
+    pub leancloud_app_key: String,
+    pub leancloud_client_id: String,
+    pub leancloud_base_url: String,
 }
 
 impl Default for AppConfig {
@@ -27,6 +31,10 @@ impl Default for AppConfig {
             difficulty_file: env::var("DIFFICULTY_FILE").unwrap_or_else(|_| "difficulty.csv".to_string()),
             info_file: env::var("INFO_FILE").unwrap_or_else(|_| "info.csv".to_string()),
             nicklist_file: env::var("NICKLIST_FILE").unwrap_or_else(|_| "nicklist.yaml".to_string()),
+            taptap_client_id: env::var("TAPTAP_CLIENT_ID").unwrap_or_else(|_| "rAK3FfdieFob2Nn8Am".to_string()),
+            leancloud_app_key: env::var("LEANCLOUD_APP_KEY").unwrap_or_else(|_| "Qr9AEqtuoSVS3zeD6iVbM4ZC0AtkJcQ89tywVyi0".to_string()),
+            leancloud_client_id: env::var("LEANCLOUD_CLIENT_ID").unwrap_or_else(|_| "rAK3FfdieFob2Nn8Am".to_string()),
+            leancloud_base_url: env::var("LEANCLOUD_BASE_URL").unwrap_or_else(|_| "https://rak3ffdi.cloud.tds1.tapapis.cn/1.1".to_string()),
         }
     }
 }
@@ -46,4 +54,4 @@ pub const SAVE_FILE_LIST: [&str; 5] = [
     "gameRecord",
     "settings",
     "user",
-]; 
+];

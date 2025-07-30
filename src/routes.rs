@@ -4,6 +4,12 @@ use crate::controllers;
 pub fn configure(cfg: &mut web::ServiceConfig) {
     // API 路由
     cfg
+        // Auth
+        .service(web::resource("/auth/qrcode")
+            .route(web::get().to(controllers::generate_qr_code))
+            .route(web::post().to(controllers::generate_qr_code)))
+        .service(web::resource("/auth/qrcode/{qrId}/status")
+            .route(web::get().to(controllers::check_qr_status)))
         // Binding
         .service(controllers::bind_user)       // POST /bind
         .service(controllers::unbind_user)     // POST /unbind
@@ -30,4 +36,4 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .service(controllers::generate_song_image)
             .service(controllers::get_rks_leaderboard)
     );
-} 
+}
