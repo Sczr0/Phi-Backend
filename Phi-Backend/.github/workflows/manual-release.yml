@@ -1,0 +1,12 @@
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set Git user identity
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+      - name: Create tag
+        run: |
+          git tag -a "v${{ github.event.inputs.version }}" -m "Release version ${{ github.event.inputs.version }}"
+          git push origin "v${{ github.event.inputs.version }}"
