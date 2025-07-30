@@ -6,6 +6,7 @@ on:
       - main
   workflow_dispatch:
 
+
 # 添加权限配置
 permissions:
   contents: write
