@@ -91,7 +91,7 @@
 ### 扫码登录
 
 -   **`GET /auth/qrcode`** 或 **`POST /auth/qrcode`**
-    -   描述: 生成用于TapTap账号登录的二维码图片（Base64编码）。客户端获取二维码后可展示给用户扫描。
+    -   描述: 生成用于TapTap账号登录的二维码图片（Base64编码）。
     -   成功响应 (`200 OK`):
         ```json
         {
@@ -110,12 +110,8 @@
         -   **`status: "success"`**: 用户已授权登录成功。
             ```json
             {
-                "code": 200,
                 "status": "success",
-                "message": "登录成功",
-                "data": {
-                    "sessionToken": "用户的TapTap SessionToken"
-                }
+                "sessionToken": "用户的TapTap SessionToken"
             }
             ```
         -   **`status: "expired"`**: 二维码已过期（通常5分钟）。
@@ -127,12 +123,7 @@
 ### 用户绑定
 
 -   **`POST /bind`**
-    -   描述: 绑定平台ID和Phigros SessionToken。系统会返回一个唯一的内部用户ID (`internal_id`)。
-    -   注意:
-        -   同一个平台 (`platform`) 下的同一个ID (`platform_id`) 只能绑定一个SessionToken。
-        -   如果使用相同的 `platform` 和 `platform_id` 尝试绑定不同的 `token`，会更新绑定的 `token`。
-        -   如果一个 `token` 已被其他 `platform` 和 `platform_id` 绑定，那么当前 `platform` 和 `platform_id` 会被关联到同一个内部用户。
-        -   `platform` 字段大小写不敏感。
+    -   描述: 绑定平台ID和Phigros SessionToken。
     -   请求体:
         ```json
         {
@@ -152,13 +143,11 @@
           }
       }
       ```
-    -   失败响应:
-        -   `400 Bad Request`: 参数错误（例如 `token` 格式无效）。
-        -   `500 Internal Server Error`: 数据库错误或其他内部错误。
+    -   失败响应: `400 Bad Request` (参数错误), `500 Internal Server Error`。
 
 -   **`POST /token/list`**
     -   描述: 获取用户关联的所有平台ID和Token列表。
-    -   请求体: `IdentifierRequest` (提供 `token` 或 `platform` + `platform_id` 来识别用户)
+    -   请求体: `IdentifierRequest`
     -   成功响应 (`200 OK`):
       ```json
       {
@@ -173,157 +162,75 @@
                       "platform_id": "123456",
                       "session_token": "token_for_qq",
                       "bind_time": "2025-01-01T12:00:00Z"
-                  },
-                  {
-                      "platform": "discord",
-                      "platform_id": "987654321",
-                      "session_token": "token_for_discord",
-                      "bind_time": "2025-01-02T13:00:00Z"
                   }
               ]
           }
       }
       ```
-    -   失败响应:
-        -   `400 Bad Request`: 未提供有效的身份标识。
-        -   `404 Not Found`: 未找到用户绑定。
-        -   `500 Internal Server Error`: 数据库错误。
+    -   失败响应: `400 Bad Request`, `404 Not Found`, `500 Internal Server Error`。
 
 -   **`POST /unbind`**
-    -   描述: 解除指定平台账号的绑定。提供两种方式：
-        1.  **平台ID + Token 验证**: 提供与绑定记录完全匹配的平台、平台ID和SessionToken。
-        2.  **简介验证**:
-         - 仅提供平台和平台ID，系统会返回一个验证码。
-         - 提供平台、平台ID和之前收到的验证码，系统将检查游戏内简介是否与验证码匹配。
-    -   注意: `platform` 字段大小写不敏感。
+    -   描述: 解除指定平台账号的绑定。支持Token验证或简介验证。
     -   请求体: `IdentifierRequest` (必须包含 `platform`, `platform_id`; 可选 `token` 或 `verification_code`)
-        ```json
-        // 方式一：平台+平台ID+Token
-        {
-            "platform": "qq",
-            "platform_id": "123456",
-            "token": "token_for_qq"
-        }
-        // 方式二：简介验证 - 获取验证码
-        {
-            "platform": "qq",
-            "platform_id": "123456"
-        }
-        // 简介验证 - 提交验证码
-        {
-            "platform": "qq",
-            "platform_id": "123456",
-            "verification_code": "ABCDEF12"
-        }
-        ```
     -   成功响应:
-        -   方式一 (Token验证)、方式三 (简介验证成功): `200 OK`
+        -   Token验证成功: `200 OK`
           ```json
           {
               "code": 200,
               "status": "success",
-              "message": "解绑成功 (平台ID+Token验证)", // 或 "解绑成功 (简介验证)"
-              "data": {
-                  "internal_id": "解绑前的内部用户ID"
-              }
+              "message": "解绑成功 (平台ID+Token验证)"
           }
           ```
-        -   方式二 (验证码获取): `200 OK`，状态为 `verification_initiated`。
+        -   简介验证 - 获取验证码: `200 OK`
           ```json
           {
               "code": 200,
               "status": "verification_initiated",
               "message": "请在 xxx 秒内将您的 Phigros 简介修改为此验证码...",
               "data": {
-                  "verification": {
-                      "verification_code": "ABCDEF12",
-                      "expires_in_seconds": 300,
-                      "message": "请在 300 秒内将您的 Phigros 简介修改为此验证码..."
-                  },
-                  "internal_id": "用户内部ID"
+                  "verification_code": "ABCDEF12",
+                  "expires_in_seconds": 300
               }
           }
           ```
-    -   失败响应:
-        -   `400 Bad Request`: 请求参数错误（例如方式一中 `token` 不匹配，方式三中验证码无效）。
-        -   `401 Unauthorized`: Token格式无效，或简介验证时使用的存储 `token` 失效。
-        -   `404 Not Found`: 提供的平台和平台ID未绑定。
-        -   `500 Internal Server Error`: 数据库或获取存档时发生内部错误。
+        -   简介验证 - 提交验证码成功: `200 OK`
+           ```json
+           {
+               "code": 200,
+               "status": "success",
+               "message": "解绑成功 (简介验证)"
+           }
+           ```
+    -   失败响应: `400 Bad Request`, `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
 ### 存档与RKS
 
 -   **`POST /get/cloud/saves`**
-    -   描述: 获取并解析用户的Phigros云存档（不含难度定数和RKS）。**注意：** 返回的 `game_record` 仅包含 `score`, `acc`, `fc`。
+    -   描述: 获取并解析用户的Phigros云存档（不含难度定数和RKS）。
+    -   请求体: `IdentifierRequest`
+    -   成功响应 (`200 OK`): 返回基础 `GameSave` 结构。
+    -   失败响应: `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
+
+-   **`POST /get/cloud/saves/with_difficulty`**
+    -   描述: 获取并解析用户的Phigros云存档，包含难度定数和计算出的RKS值。
+    -   请求体: `IdentifierRequest`
+    -   成功响应 (`200 OK`): 返回包含 `difficulty` 和 `rks` 的 `GameSave` 结构。
+    -   失败响应: `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
+
+-   **`POST /rks`**
+    -   描述: 计算并返回用户所有歌曲的RKS分数，按分数由高到低排序。
     -   请求体: `IdentifierRequest`
     -   成功响应 (`200 OK`):
       ```json
       {
           "code": 200,
           "status": "OK",
-          "message": null,
-          "data": {
-              "game_key": "...",
-              "game_progress": { ... },
-              "game_record": {
-                  "SONG_ID_1": {
-                      "EZ": { "score": ..., "acc": ..., "fc": ... },
-                      "HD": { "score": ..., "acc": ..., "fc": ... }
-                  }
-              },
-              "settings": { ... },
-              "user": { ... },
-              "nickname": "玩家昵称" // 如果获取成功
-          }
-      }
-      ```
-    -   失败响应: `401 Unauthorized` (无效Token), `404 Not Found` (未找到存档), `500 Internal Server Error`。
-
--   **`POST /get/cloud/saves/with_difficulty`**
-    -   描述: 获取并解析用户的Phigros云存档，**包含难度定数和计算出的RKS值**。
-    -   请求体: `IdentifierRequest`
-    -   成功响应 (`200 OK`): 返回完整的 `GameSave` 结构，其中 `SongRecord` 包含 `difficulty` 和 `rks` 字段。
-      ```json
-      {
-          "code": 200,
-          "status": "OK",
-          "message": null,
-          "data": { // 完整的 GameSave 结构
-              "game_key": "...",
-              "game_progress": { ... },
-              "game_record": {
-                  "SONG_ID_1": {
-                      "EZ": { "score": ..., "acc": ..., "fc": ..., "difficulty": ..., "rks": ... },
-                      "HD": { "score": ..., "acc": ..., "fc": ..., "difficulty": ..., "rks": ... }
-                  }
-              },
-              "settings": { ... },
-              "user": { ... }
-          }
-      }
-      ```
-    -   失败响应: `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
-
--   **`POST /rks`**
-    -   描述: 计算并返回用户所有歌曲的RKS分数，按分数由高到低排序。
-    -   请求体: `IdentifierRequest`
-    -   成功响应 (`200 OK`): 返回 `RksResult` 结构。
-      ```json
-      {
-          "code": 200,
-          "status": "OK",
-          "message": null,
           "data": {
               "records": [
                   {
-                      "song_id": "...",
-                      "song_name": "...",
-                      "difficulty": "IN",
-                      "difficulty_value": ...,
-                      "acc": ...,
-                      "score": ...,
-                      "rks": ...
-                  },
-                  // ... 其他记录
+                      "song_id": "...", "song_name": "...", "difficulty": "IN",
+                      "difficulty_value": ..., "acc": ..., "score": ..., "rks": ...
+                  }
               ]
           }
       }
@@ -331,192 +238,65 @@
     -   失败响应: `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
 -   **`POST /b30`**
-    -   描述: 计算并返回用户的B30 (Best 30) 成绩列表。
+    -   描述: 计算并返回用户的B30成绩。
     -   请求体: `IdentifierRequest`
-    -   成功响应 (`200 OK`): 返回 `RksRecord` 列表 (最多30条)。
-      ```json
-      {
-          "code": 200,
-          "status": "success",
-          "message": "B30获取成功",
-          "data": [
-              // RksRecord 列表
-          ]
-      }
-      ```
+    -   成功响应 (`200 OK`): 返回 `B30Result` 结构。
     -   失败响应: `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
--   **`POST /bn/{n}`** (例如 `/bn/40` 获取B40)
-    -   描述: 计算并返回用户的 Best N 成绩列表。路径参数 `n` 指定 N 的大小，必须大于0。
+-   **`POST /bn/{n}`**
+    -   描述: 计算并返回用户的 Best N 成绩。
+    -   路径参数: `n` (整数, 必须大于0)
     -   请求体: `IdentifierRequest`
-    -   路径参数: `n` (整数, 指定最佳成绩的数量，必须大于0)
-    -   成功响应 (`200 OK`): 返回 `RksRecord` 列表 (最多n条)。
-      ```json
-      {
-          "code": 200,
-          "status": "OK",
-          "message": null,
-          "data": [
-              // RksRecord 列表
-          ]
-      }
-      ```
-    -   失败响应: `400 Bad Request` (n不是有效数字或n=0), `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
+    -   成功响应 (`200 OK`): 返回 `BnResult` 结构。
+    -   失败响应: `400 Bad Request`, `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
 ### 歌曲查询
 
--   **`GET /song/search`**
-    -   描述: 统一搜索歌曲信息，支持通过ID、歌曲名和别名查询。
-    -   参数: `q` (必需) - 搜索关键词
-    -   示例: `/song/search?q=fractured+angel`
-    -   成功响应 (`200 OK`):
-      ```json
-      {
-          "code": 200,
-          "status": "OK",
-          "message": null,
-          "data": {
-              "id": "FracturedAngel.Cametek",
-              "song": "Fractured Angel",
-              "artist": "Camellia",
-              "difficulty": {
-                  "ez": 3.5,
-                  "hd": 7.8,
-                  "in": 13.7,
-                  "at": 15.8
-              }
-          }
-      }
-      ```
-    -   失败响应:
-        -   `400 Bad Request`: 未提供搜索关键词。
-        -   `404 Not Found`: 未找到匹配的歌曲。
-        -   `409 Conflict`: 搜索结果不唯一，提供了可能的匹配列表。
-
--   **`GET /song/search/predictions`**
-    -   描述: 查询歌曲的预测常数信息，支持通过ID、歌曲名和别名查询。
-    -   参数:
-        -   `q` (必需) - 搜索关键词（ID、歌名或别名）
-        -   `difficulty` (可选) - 指定难度，可选值：`EZ`、`HD`、`IN`、`AT`。如不提供，则返回所有难度。
-    -   示例: `/song/search/predictions?q=fractured+angel&difficulty=IN`
-    -   成功响应 (`200 OK`):
-      ```json
-      {
-          "code": 200,
-          "status": "OK",
-          "message": null,
-          "data": [
-              {
-                  "song_id": "FracturedAngel.Cametek",
-                  "difficulty": "IN",
-                  "predicted_constant": 13.8
-              }
-          ]
-      }
-      ```
-    -   如果不指定难度，则返回所有难度:
-      ```json
-      {
-          "code": 200,
-          "status": "OK",
-          "message": null,
-          "data": [
-              {
-                  "song_id": "FracturedAngel.Cametek",
-                  "difficulty": "EZ",
-                  "predicted_constant": 3.6
-              },
-              {
-                  "song_id": "FracturedAngel.Cametek",
-                  "difficulty": "HD",
-                  "predicted_constant": 7.9
-              },
-              {
-                  "song_id": "FracturedAngel.Cametek",
-                  "difficulty": "IN",
-                  "predicted_constant": 13.8
-              },
-              {
-                  "song_id": "FracturedAngel.Cametek",
-                  "difficulty": "AT",
-                  "predicted_constant": 15.9
-              }
-          ]
-      }
-      ```
-    -   失败响应:
-        -   `400 Bad Request`: 未提供搜索关键词。
-        -   `404 Not Found`: 未找到匹配的歌曲或预测常数数据。
-        -   `409 Conflict`: 搜索结果不唯一，提供了可能的匹配列表。
-
--   **`POST /song/search/record`**
-    -   描述: **(推荐)** 统一查询指定歌曲的成绩记录。
-    -   查询参数:
-        -   `q`: (必需) 歌曲ID、名称或别名。
-        -   `difficulty`: (可选) 难度级别 (EZ, HD, IN, AT)。如果提供，只返回该难度的成绩；否则返回所有难度的成绩。
-    -   请求体: `IdentifierRequest`
-    -   示例: `POST /song/search/record?q=打工人&difficulty=IN`
-    -   成功响应 (`200 OK`):
-      ```json
-      {
-          "code": 200,
-          "status": "OK",
-          "message": null,
-          "data": {
-              "EZ": { ... }, // SongRecord 结构，包含 difficulty 和 rks
-              "HD": { ... }
-              // ... 其他难度
-          }
-      }
-      ```
-    -   失败响应: `400 Bad Request`, `401 Unauthorized`, `404 Not Found`, `409 Conflict` (歌曲查询结果不唯一), `500 Internal Server Error`。
-
-### 旧版歌曲接口 (兼容)
-
--   **`GET /song/info`**
-    -   描述: 获取歌曲信息（旧版接口）。
-    -   查询参数 (至少提供一个):
-        -   `song_id`: 歌曲ID。
-        -   `song_name`: 歌曲名称。
-        -   `nickname`: 歌曲别名。
+-   **`GET /song/search`** (推荐)
+    -   描述: 统一搜索歌曲信息。
+    -   查询参数: `q` (必需) - 搜索关键词
     -   成功响应 (`200 OK`): 返回 `SongInfo`。
     -   失败响应: `400 Bad Request`, `404 Not Found`, `409 Conflict`。
 
--   **`POST /song/record`**
-    -   描述: 获取特定歌曲的成绩记录（旧版接口）。
-    -   查询参数 (至少提供一个):
-        -   `song_id`: 歌曲ID。
-        -   `song_name`: 歌曲名称。
-        -   `nickname`: 歌曲别名。
-        -   `difficulty`: (可选) 难度级别。
+-   **`POST /song/search/record`** (推荐)
+    -   描述: 查询指定歌曲的成绩记录。
+    -   查询参数:
+        -   `q`: (必需) 歌曲ID、名称或别名。
+        -   `difficulty`: (可选) 难度级别 (EZ, HD, IN, AT)。
     -   请求体: `IdentifierRequest`
-    -   成功响应 (`200 OK`): 返回包含 `SongRecord` 的 `HashMap`。
-    -   失败响应: `400 Bad Request`, `401 Unauthorized`, `404 Not Found`, `409 Conflict`, `500 Internal Server Error`。
+    -   成功响应 (`200 OK`): 返回该歌曲的 `SongRecord`。
+    -   失败响应: `400 Bad Request`, `401 Unauthorized`, `404 Not Found`, `409 Conflict`。
 
-### 图片生成接口
+-   **`GET /song/search/predictions`**
+    -   描述: 查询歌曲的预测常数信息。
+    -   查询参数:
+        -   `q` (必需) - 搜索关键词
+        -   `difficulty` (可选) - 指定难度，如不提供则返回所有难度。
+    -   成功响应 (`200 OK`): 返回预测常数列表。
+    -   失败响应: `400 Bad Request`, `404 Not Found`, `409 Conflict`。
+
+-   ***旧版兼容接口***: `GET /song/info` 和 `POST /song/record` 依然可用，但推荐使用新的 `/song/search/*` 接口。
+
+### 图片生成
 
 -   **`POST /image/bn/{n}`**
     -   描述: 生成用户的Best N成绩图片。
-    -   路径参数: `n` (整数, 指定最佳成绩的数量，必须大于0)
+    -   路径参数: `n` (整数, 必须大于0)
     -   请求体: `IdentifierRequest`
-    -   成功响应 (`200 OK`): 返回PNG格式的图片数据。
-    -   失败响应: `400 Bad Request` (n不是有效数字或n=0), `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
+    -   成功响应 (`200 OK`): 返回二进制PNG格式的图片数据。
+    -   失败响应: `400 Bad Request`, `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
 -   **`POST /image/song`**
     -   描述: 生成指定歌曲的成绩图片。
-    -   查询参数:
-        -   `q`: (必需) 歌曲ID、名称或别名。
+    -   查询参数: `q` (必需) - 歌曲关键词。
     -   请求体: `IdentifierRequest`
-    -   示例: `POST /image/song?q=痉挛`
-    -   成功响应 (`200 OK`): 返回PNG格式的图片数据。
-    -   失败响应: `400 Bad Request`, `401 Unauthorized`, `404 Not Found`, `409 Conflict` (歌曲查询结果不唯一), `500 Internal Server Error`。
+    -   成功响应 (`200 OK`): 返回二进制PNG格式的图片数据。
+    -   失败响应: `400 Bad Request`, `401 Unauthorized`, `404 Not Found`, `409 Conflict`。
 
 -   **`GET /image/leaderboard/rks`**
-    -   描述: 生成RKS排行榜图片。（暂不推荐使用）
-    -   查询参数:
-        -   `limit`: (可选) 显示的玩家数量，默认为20。
-    -   示例: `GET /image/leaderboard/rks?limit=10`
-    -   成功响应 (`200 OK`): 返回PNG格式的图片数据。
+    -   描述: 生成RKS排行榜图片。
+    -   查询参数: `limit` (可选) - 显示的玩家数量，默认为20。
+    -   成功响应 (`200 OK`): 返回二进制PNG格式的图片数据。
     -   失败响应: `500 Internal Server Error`。
 
 ## 数据模型
