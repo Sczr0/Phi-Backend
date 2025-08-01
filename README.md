@@ -88,6 +88,42 @@
     }
     ```
 
+### 扫码登录
+
+-   **`GET /auth/qrcode`** 或 **`POST /auth/qrcode`**
+    -   描述: 生成用于TapTap账号登录的二维码图片（Base64编码）。客户端获取二维码后可展示给用户扫描。
+    -   成功响应 (`200 OK`):
+        ```json
+        {
+            "qrId": "唯一的二维码ID，用于查询状态",
+            "qrCodeImage": "data:image/png;base64,xxxxxxxxxx..." // Base64编码的PNG图片数据
+        }
+        ```
+    -   失败响应: `500 Internal Server Error` (二维码生成失败)。
+
+-   **`GET /auth/qrcode/{qrId}/status`**
+    -   描述: 查询指定二维码的登录状态。
+    -   路径参数: `qrId` (通过 `/auth/qrcode` 获取的二维码ID)
+    -   成功响应 (`200 OK`):
+        -   **`status: "pending"`**: 等待用户扫描二维码。
+        -   **`status: "scanned"`**: 用户已扫描二维码，等待授权。
+        -   **`status: "success"`**: 用户已授权登录成功。
+            ```json
+            {
+                "code": 200,
+                "status": "success",
+                "message": "登录成功",
+                "data": {
+                    "sessionToken": "用户的TapTap SessionToken"
+                }
+            }
+            ```
+        -   **`status: "expired"`**: 二维码已过期（通常5分钟）。
+        -   **`status: "error"`**: 发生其他错误。
+    -   失败响应:
+        -   `404 Not Found`: `qrId` 无效或已过期。
+        -   `500 Internal Server Error`: 其他内部错误。
+
 ### 用户绑定
 
 -   **`POST /bind`**
@@ -223,7 +259,7 @@
       ```json
       {
           "code": 200,
-          "status": "ok",
+          "status": "OK",
           "message": null,
           "data": {
               "game_key": "...",
@@ -249,8 +285,8 @@
       ```json
       {
           "code": 200,
-          "status": "success",
-          "message": "成功获取并解析带定数的云存档",
+          "status": "OK",
+          "message": null,
           "data": { // 完整的 GameSave 结构
               "game_key": "...",
               "game_progress": { ... },
@@ -274,17 +310,17 @@
       ```json
       {
           "code": 200,
-          "status": "success",
-          "message": "RKS计算成功",
+          "status": "OK",
+          "message": null,
           "data": {
               "records": [
                   {
-                      "song_id": "...", 
-                      "song_name": "...", 
-                      "difficulty": "IN", 
-                      "difficulty_value": ..., 
-                      "acc": ..., 
-                      "score": ..., 
+                      "song_id": "...",
+                      "song_name": "...",
+                      "difficulty": "IN",
+                      "difficulty_value": ...,
+                      "acc": ...,
+                      "score": ...,
                       "rks": ...
                   },
                   // ... 其他记录
@@ -311,21 +347,21 @@
     -   失败响应: `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
 -   **`POST /bn/{n}`** (例如 `/bn/40` 获取B40)
-    -   描述: 计算并返回用户的 Best N 成绩列表。路径参数 `n` 指定 N 的大小 (默认为 30)。
+    -   描述: 计算并返回用户的 Best N 成绩列表。路径参数 `n` 指定 N 的大小，必须大于0。
     -   请求体: `IdentifierRequest`
-    -   路径参数: `n` (整数, 指定最佳成绩的数量)
+    -   路径参数: `n` (整数, 指定最佳成绩的数量，必须大于0)
     -   成功响应 (`200 OK`): 返回 `RksRecord` 列表 (最多n条)。
       ```json
       {
           "code": 200,
-          "status": "success",
-          "message": "B{n}获取成功",
+          "status": "OK",
+          "message": null,
           "data": [
               // RksRecord 列表
           ]
       }
       ```
-    -   失败响应: `400 Bad Request` (n不是有效数字), `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
+    -   失败响应: `400 Bad Request` (n不是有效数字或n=0), `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
 ### 歌曲查询
 
@@ -461,10 +497,10 @@
 
 -   **`POST /image/bn/{n}`**
     -   描述: 生成用户的Best N成绩图片。
-    -   路径参数: `n` (整数, 指定最佳成绩的数量)
+    -   路径参数: `n` (整数, 指定最佳成绩的数量，必须大于0)
     -   请求体: `IdentifierRequest`
     -   成功响应 (`200 OK`): 返回PNG格式的图片数据。
-    -   失败响应: `400 Bad Request` (n不是有效数字), `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
+    -   失败响应: `400 Bad Request` (n不是有效数字或n=0), `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
 -   **`POST /image/song`**
     -   描述: 生成指定歌曲的成绩图片。

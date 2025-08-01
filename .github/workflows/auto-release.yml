@@ -51,6 +51,8 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y pkg-config libssl-dev build-essential
         echo "OPENSSL_DIR=/usr" >> $GITHUB_ENV
+        echo "OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu" >> $GITHUB_ENV
+        echo "OPENSSL_INCLUDE_DIR=/usr/include" >> $GITHUB_ENV
         echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
 
     - name: Install OpenSSL (macOS)
@@ -64,6 +66,8 @@ jobs:
     - name: Build binary
       env:
         OPENSSL_DIR: ${{ env.OPENSSL_DIR }}
+        OPENSSL_LIB_DIR: ${{ env.OPENSSL_LIB_DIR }}
+        OPENSSL_INCLUDE_DIR: ${{ env.OPENSSL_INCLUDE_DIR }}
         PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
         LIBRARY_PATH: ${{ env.LIBRARY_PATH }}
       run: |
