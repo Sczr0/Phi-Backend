@@ -17,6 +17,7 @@ use services::phigros::PhigrosService;
 use services::song::SongService;
 use services::user::UserService;
 use services::player_archive_service::PlayerArchiveService;
+use services::image_service::ImageService; // 新增
 use utils::cover_loader;
 
 #[actix_web::main]
@@ -118,12 +119,14 @@ async fn main() -> std::io::Result<()> {
         let song_service = web::Data::new(SongService::new());
         let user_service = web::Data::new(UserService::new(pool.clone()));
         let player_archive_service = web::Data::new(player_archive_service.clone());
+        let image_service = web::Data::new(ImageService::new()); // 新增
 
         App::new()
             .app_data(phigros_service.clone())
             .app_data(song_service.clone())
             .app_data(user_service.clone())
             .app_data(player_archive_service.clone())
+            .app_data(image_service.clone()) // 新增
             .wrap(middleware::Logger::default())
             .wrap(cors)
             .configure(routes::configure)

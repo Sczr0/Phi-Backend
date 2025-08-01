@@ -73,6 +73,12 @@ percent-encoding = "2.3.1"
 # tiny-skia = "0.11"
 # usvg = "0.37"
 
+# 并行计算
+rayon = "1.10.0"
+
+# 缓存
+moka = { version = "0.12", features = ["future"] }
+
 [features]
 default = []
 

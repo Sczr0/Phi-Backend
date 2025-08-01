@@ -261,37 +261,22 @@ impl PlayerArchiveService {
     pub async fn recalculate_player_rks(&self, player_id: &str) -> Result<f64, AppError> {
         log::info!("重新计算玩家[{}]RKS", player_id);
         
-        // 获取玩家所有当前成绩，并按RKS降序排序
+        // (优化后) 一次查询获取所有当前成绩的rks和acc
         let scores = query!(
-            "SELECT rks FROM chart_scores 
-             WHERE player_id = ? AND is_current = 1 
+            "SELECT rks, acc FROM chart_scores
+             WHERE player_id = ? AND is_current = 1
              ORDER BY rks DESC",
             player_id
         )
         .fetch_all(&self.pool)
         .await
         .map_err(|e| AppError::DatabaseError(format!("查询成绩RKS失败: {}", e)))?;
-        
-        let mut rks_values: Vec<f64> = Vec::new();
-        for record in scores {
-            rks_values.push(record.rks);
-        }
-        
-        // 获取AP成绩
-        let ap_scores = query!(
-            "SELECT rks FROM chart_scores 
-             WHERE player_id = ? AND is_current = 1 AND acc >= 100.0
-             ORDER BY rks DESC",
-            player_id
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| AppError::DatabaseError(format!("查询AP成绩失败: {}", e)))?;
-        
-        let mut ap_rks_values: Vec<f64> = Vec::new();
-        for record in ap_scores {
-            ap_rks_values.push(record.rks);
-        }
+
+        let rks_values: Vec<f64> = scores.iter().map(|s| s.rks).collect();
+        let ap_rks_values: Vec<f64> = scores.iter()
+            .filter(|s| s.acc >= 100.0)
+            .map(|s| s.rks)
+            .collect();
         
         // 计算Best N和AP Top 3的RKS
         let best_n_count = self.config.best_n_count as usize;
@@ -398,39 +383,42 @@ impl PlayerArchiveService {
         .await
         .map_err(|e| AppError::DatabaseError(format!("重置旧成绩状态失败: {}", e)))?;
 
-        // 3. 逐条插入新的当前成绩 (移除 UNNEST 尝试)
-        log::debug!("开始逐条插入 {} 条新成绩记录...", rks_records.len());
-        for record in rks_records {
+        // 3. 批量插入新的当前成绩
+        log::debug!("开始批量插入 {} 条新成绩记录...", rks_records.len());
+        let mut sql = String::from("INSERT INTO chart_scores (player_id, song_id, song_name, difficulty, difficulty_value, score, acc, rks, is_fc, is_phi, play_time, is_current) VALUES ");
+        let mut bindings = Vec::new();
+        for (i, record) in rks_records.iter().enumerate() {
+            if i > 0 {
+                sql.push_str(", ");
+            }
+            sql.push_str("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
             let key = format!("{}-{}", record.song_id, record.difficulty);
             let is_fc = fc_map.get(&key).copied().unwrap_or(false);
             let is_phi = record.acc >= 100.0;
-            let is_fc_i32 = is_fc as i32;
-            let is_phi_i32 = is_phi as i32;
-            let play_time_str = update_time.to_rfc3339(); // Use the same transaction start time
-            let score_value = record.score.unwrap_or(0.0); // Store score in a variable
-
-            query!(
-                "INSERT INTO chart_scores (
-                    player_id, song_id, song_name, difficulty, difficulty_value, 
-                    score, acc, rks, is_fc, is_phi, play_time, is_current
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
-                player_id, 
-                record.song_id, 
-                record.song_name, 
-                record.difficulty, 
-                record.difficulty_value,
-                score_value, // Use the variable here
-                record.acc, 
-                record.rks, 
-                is_fc_i32,
-                is_phi_i32,
-                play_time_str,
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e_inner| AppError::DatabaseError(format!("插入单条成绩失败 for {}-{}: {}", record.song_id, record.difficulty, e_inner)))?;
+            
+            bindings.push(player_id.to_string());
+            bindings.push(record.song_id.clone());
+            bindings.push(record.song_name.clone());
+            bindings.push(record.difficulty.clone());
+            bindings.push(record.difficulty_value.to_string());
+            bindings.push(record.score.unwrap_or(0.0).to_string());
+            bindings.push(record.acc.to_string());
+            bindings.push(record.rks.to_string());
+            bindings.push((is_fc as i32).to_string());
+            bindings.push((is_phi as i32).to_string());
+            bindings.push(update_time.to_rfc3339());
         }
-        log::debug!("逐条插入完成");
+
+        let mut q = query(&sql);
+        for binding in &bindings {
+            q = q.bind(binding);
+        }
+
+        q.execute(&mut *tx)
+            .await
+            .map_err(|e| AppError::DatabaseError(format!("批量插入成绩失败: {}", e)))?;
+
+        log::debug!("批量插入完成");
         
         // 提交事务
         tx.commit().await
@@ -511,43 +499,59 @@ impl PlayerArchiveService {
             .await
             .map_err(|e| AppError::DatabaseError(format!("清除旧推分ACC记录失败: {}", e)))?;
         
-        // 计算每个谱面的推分ACC
-        let mut push_acc_count = 0;
+        // (优化后) 计算并批量插入推分ACC
+        let mut records_to_insert = Vec::new();
         for score in &all_scores {
-            // 已经是AP成绩或定数为0，不需要计算推分
             if score.acc >= 100.0 || score.difficulty_value <= 0.0 {
                 continue;
             }
-            
             let target_chart_id = format!("{}-{}", score.song_id, score.difficulty);
-            
-            // 计算推分ACC
             if let Some(push_acc) = calculate_target_chart_push_acc(&target_chart_id, score.difficulty_value, &sorted_records) {
-                // 如果计算出来的推分ACC低于当前ACC或等于100%，则没有实际意义
-                if push_acc <= score.acc {
-                    continue;
+                if push_acc > score.acc {
+                    records_to_insert.push((score.song_id.clone(), score.difficulty.clone(), push_acc));
                 }
-                
-                // 插入推分ACC记录
-                let update_time_str = Utc::now().to_rfc3339();
-                query!(
-                    "INSERT INTO push_acc (player_id, song_id, difficulty, push_acc, update_time) 
-                     VALUES (?, ?, ?, ?, ?)",
-                    player_id, score.song_id, score.difficulty, push_acc, update_time_str
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| AppError::DatabaseError(format!("插入推分ACC记录失败: {}", e)))?;
-                
-                push_acc_count += 1;
             }
         }
-        
+
+        let push_acc_count = records_to_insert.len();
+        if push_acc_count > 0 {
+            log::debug!("批量插入 {} 条推分ACC记录...", push_acc_count);
+            let update_time_str = Utc::now().to_rfc3339();
+            
+            let mut sql = String::from("INSERT INTO push_acc (player_id, song_id, difficulty, push_acc, update_time) VALUES ");
+            let mut bindings: Vec<String> = Vec::new();
+
+            for (i, (song_id, difficulty, push_acc)) in records_to_insert.iter().enumerate() {
+                if i > 0 {
+                    sql.push_str(", ");
+                }
+                sql.push_str("(?, ?, ?, ?, ?)");
+                bindings.push(player_id.to_string());
+                bindings.push(song_id.clone());
+                bindings.push(difficulty.clone());
+                bindings.push(push_acc.to_string());
+                bindings.push(update_time_str.clone());
+            }
+
+            let mut q = query(&sql);
+            for binding in &bindings {
+                q = q.bind(binding);
+            }
+            
+            q.execute(&mut *tx)
+                .await
+                .map_err(|e| AppError::DatabaseError(format!("批量插入推分ACC失败: {}", e)))?;
+        }
+
         // 提交事务
         tx.commit().await
             .map_err(|e| AppError::DatabaseError(format!("提交事务失败: {}", e)))?;
         
-        log::info!("计算完成，玩家[{}]共有{}个谱面可推分", player_id, push_acc_count);
+        if push_acc_count > 0 {
+            log::info!("计算完成，玩家[{}]共有{}个谱面可推分", player_id, push_acc_count);
+        } else {
+            log::info!("计算完成，玩家[{}]没有可推分的谱面", player_id);
+        }
         
         // 清除缓存
         {

@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use base64::{engine::general_purpose, Engine as _};
@@ -651,35 +652,38 @@ pub fn calculate_b30(save: &GameSave) -> AppResult<B30Result> {
         .ok_or_else(|| AppError::Other("没有游戏记录数据".to_string()))?;
     log::debug!("B30: 获取到 GameRecord，包含 {} 首歌曲", game_record.len());
 
-    let mut all_played_records = Vec::new();
-
-    // 1. 收集所有有效成绩并计算RKS
-    log::debug!("B30: 开始收集有效成绩记录...");
-    for (song_id, difficulties) in game_record {
-        for (diff_name, record) in difficulties {
-            if let (Some(acc), Some(difficulty)) = (record.acc, record.difficulty) {
-                 log::trace!("B30: 检查 '{}' - '{}', acc={}, difficulty={}", song_id, diff_name, acc, difficulty);
-                if acc >= 70.0 && difficulty > 0.0 { // 只考虑acc >= 70%且定数 > 0的谱面
-                    let rks = ((acc - 55.0) / 45.0).powf(2.0) * difficulty;
-                    let is_ap = record.score.map_or(false, |s| s == 1_000_000.0);
-                    log::trace!("  -> 有效记录，计算 RKS={}, is_ap={}", rks, is_ap);
-                    
-                    all_played_records.push(B30Record {
-                        song_id: song_id.clone(),
-                        difficulty_str: diff_name.clone(),
-                        score: record.score,
-                        acc: Some(acc),
-                        fc: record.fc,
-                        difficulty: Some(difficulty),
-                        rks: Some(rks),
-                        is_ap,
-                    });
-                } else {
-                    log::trace!("  -> 不满足条件，跳过");
-                }
-            }
-        }
-    }
+    // 1. (优化后) 使用 Rayon 并行收集所有有效成绩并计算RKS
+    log::debug!("B30: 开始并行收集有效成绩记录...");
+    let mut all_played_records: Vec<B30Record> = game_record
+        .par_iter()
+        .flat_map(|(song_id, difficulties)| {
+            difficulties
+                .par_iter()
+                .filter_map(|(diff_name, record)| {
+                    if let (Some(acc), Some(difficulty)) = (record.acc, record.difficulty) {
+                        if acc >= 70.0 && difficulty > 0.0 {
+                            let rks = ((acc - 55.0) / 45.0).powf(2.0) * difficulty;
+                            let is_ap = record.score.map_or(false, |s| s == 1_000_000.0);
+                            Some(B30Record {
+                                song_id: song_id.clone(),
+                                difficulty_str: diff_name.clone(),
+                                score: record.score,
+                                acc: Some(acc),
+                                fc: record.fc,
+                                difficulty: Some(difficulty),
+                                rks: Some(rks),
+                                is_ap,
+                            })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
     log::debug!("B30: 共收集到 {} 条有效成绩记录", all_played_records.len());
     if all_played_records.len() < 5 && !all_played_records.is_empty() {
         log::debug!("B30: 抽样几条记录: {:?}", all_played_records.iter().take(5).collect::<Vec<_>>());

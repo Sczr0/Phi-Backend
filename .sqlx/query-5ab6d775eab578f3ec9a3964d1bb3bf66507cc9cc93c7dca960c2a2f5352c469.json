@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT rks, acc FROM chart_scores\n             WHERE player_id = ? AND is_current = 1\n             ORDER BY rks DESC",
+  "describe": {
+    "columns": [
+      {
+        "name": "rks",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "acc",
+        "ordinal": 1,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "5ab6d775eab578f3ec9a3964d1bb3bf66507cc9cc93c7dca960c2a2f5352c469"
+}
