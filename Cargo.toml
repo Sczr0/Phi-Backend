@@ -39,7 +39,7 @@ flate2 = "1.0.28"
 
 # 异步
 tokio = { version = "1", features = ["full"] }
-futures = "0.3"
+# futures = "0.3"
 
 # 工具库
 lazy_static = "1.4.0"
@@ -60,15 +60,15 @@ uuid = { version = "1.4", features = ["v4", "serde"] }
 
 # 图像处理 (基础库仍需要)
 image = "0.24"
-urlencoding = "2.1"
-url = "2.3"
+# urlencoding = "2.1"
+# url = "2.3"
 
 # Git 操作
 git2 = "0.18"
 
 # SVG 渲染
 resvg = "0.41"
-itertools = "0.14.0"
+# itertools = "0.14.0"
 percent-encoding = "2.3.1"
 # tiny-skia = "0.11"
 # usvg = "0.37"
@@ -78,6 +78,7 @@ rayon = "1.10.0"
 
 # 缓存
 moka = { version = "0.12", features = ["future"] }
+askama = "0.12"
 
 [features]
 default = []
@@ -85,3 +86,6 @@ default = []
 # 添加 release 配置以包含调试信息
 [profile.release]
 debug = true
+
+[package.metadata.cargo-machete]
+ignored = ["md-5"]
