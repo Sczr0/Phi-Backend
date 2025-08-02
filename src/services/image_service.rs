@@ -179,13 +179,11 @@ fn simulate_rks_increase(
 
     let mut current_b27_sum = precalculated.b27_sum;
     let mut current_ap3_sum = precalculated.ap3_sum;
-    let mut _simulated_ap_records = precalculated.ap_records_sorted_by_rks.clone(); // Prefix unused mutable variable
 
     // 查找原记录信息
     let original_record_opt = all_sorted_records.iter()
         .find(|r| r.song_id == song_id && r.difficulty == difficulty);
 
-    let _original_rks = original_record_opt.map_or(0.0, |r| r.rks); // Prefix unused variable
     let original_is_ap = original_record_opt.map_or(false, |r| r.acc >= 100.0);
 
     // --- 模拟 B27 更新 ---
@@ -694,7 +692,7 @@ impl ImageService {
             async {
                 log::info!("生成RKS排行榜图片，显示前{}名玩家", actual_limit);
         
-                let top_players = player_archive_service.get_rks_ranking(actual_limit).await?;
+                let top_players = player_archive_service.get_ref().get_rks_ranking(actual_limit).await?;
                 
                 let render_data = LeaderboardRenderData {
                     title: "RKS 排行榜".to_string(),

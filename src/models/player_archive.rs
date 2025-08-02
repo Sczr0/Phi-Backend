@@ -23,7 +23,7 @@ pub struct PlayerBasicInfo {
     pub update_time: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, FromRow)]
 pub struct ChartScore {
     pub song_id: String,
     pub song_name: String,

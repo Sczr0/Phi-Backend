@@ -1,261 +1,188 @@
 use crate::models::player_archive::{
-    PlayerArchive, ChartScore, ChartScoreHistory, ArchiveConfig, PlayerBasicInfo, RKSRankingEntry
+    PlayerArchive, ChartScore, ChartScoreHistory, ArchiveConfig, RKSRankingEntry,
 };
 use crate::models::rks::RksRecord;
 use crate::utils::error::AppError;
 use chrono::{DateTime, Utc};
 use sqlx::{SqlitePool, query, query_as};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use log;
 use sqlx::Row;
+use moka::future::Cache;
+use std::time::Duration;
 
 #[derive(Clone)]
 pub struct PlayerArchiveService {
     pool: SqlitePool,
     config: ArchiveConfig,
-    // 为频繁访问的数据添加内存缓存
-    cache: Arc<Mutex<HashMap<String, (PlayerArchive, DateTime<Utc>)>>>,
+    // 使用 moka 作为高性能并发缓存
+    cache: Cache<String, Arc<PlayerArchive>>,
 }
 
 impl PlayerArchiveService {
     pub fn new(pool: SqlitePool, config: Option<ArchiveConfig>) -> Self {
+        // 初始化 moka 缓存
+        // - 设置最大容量为 1000 个条目
+        // - 设置生存时间 (TTL) 为 5 分钟
+        let cache = Cache::builder()
+            .max_capacity(1000)
+            .time_to_live(Duration::from_secs(300))
+            .build();
+
         Self {
             pool,
             config: config.unwrap_or_default(),
-            cache: Arc::new(Mutex::new(HashMap::new())),
+            cache,
         }
     }
 
-    /// 获取玩家存档
+    /// 获取玩家存档 (已重构)
+    /// - 使用 moka 缓存，自动处理过期。
+    /// - 将多个数据库查询合并为一个，解决 N+1 问题。
+    /// - 使用窗口函数在数据库端直接筛选历史记录。
     pub async fn get_player_archive(&self, player_id: &str) -> Result<Option<PlayerArchive>, AppError> {
-        // 检查缓存
-        {
-            let cache = self.cache.lock().unwrap();
-            if let Some((archive, timestamp)) = cache.get(player_id) {
-                // 如果缓存不超过5分钟，直接返回
-                let now = Utc::now();
-                if (now - *timestamp).num_seconds() < 300 {
-                    log::debug!("从缓存获取玩家[{}]存档", player_id);
-                    return Ok(Some(archive.clone()));
-                }
-            }
+        // 1. 检查缓存
+        if let Some(archive_arc) = self.cache.get(player_id).await {
+            log::debug!("从缓存获取玩家[{}]存档", player_id);
+            return Ok(Some(archive_arc.as_ref().clone()));
         }
         
-        // 查询玩家基本信息
-        let player = query_as::<_, PlayerBasicInfo>(
-            "SELECT player_id, player_name, rks, update_time FROM player_archives WHERE player_id = ?"
-        )
-        .bind(player_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| AppError::DatabaseError(format!("查询玩家失败: {}", e)))?;
-        
-        let player = match player {
-            Some(p) => p,
-            None => {
-                log::debug!("玩家[{}]不存在", player_id);
-                return Ok(None);
-            }
-        };
-        
-        // 查询玩家所有当前成绩
-        let scores = query_as::<_, DbChartScore>(
-            "SELECT song_id, song_name, difficulty, difficulty_value, score, acc, rks, is_fc, is_phi, play_time 
-             FROM chart_scores 
-             WHERE player_id = ? AND is_current = 1"
-        )
-        .bind(player_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| AppError::DatabaseError(format!("查询成绩失败: {}", e)))?;
-        
-        let mut best_scores = HashMap::new();
-        let mut all_scores = Vec::new();
-        
-        for db_score in scores {
-            let score = ChartScore {
-                song_id: db_score.song_id,
-                song_name: db_score.song_name,
-                difficulty: db_score.difficulty,
-                difficulty_value: db_score.difficulty_value,
-                score: db_score.score,
-                acc: db_score.acc,
-                rks: db_score.rks,
-                is_fc: db_score.is_fc != 0,
-                is_phi: db_score.is_phi != 0,
-                play_time: db_score.play_time,
-            };
-            
-            let key = format!("{}-{}", score.song_id, score.difficulty);
-            best_scores.insert(key, score.clone());
-            all_scores.push(score);
-        }
-        
-        // 获取BestN成绩
-        let mut best_n_scores = all_scores.clone();
-        best_n_scores.sort_by(|a, b| b.rks.partial_cmp(&a.rks).unwrap_or(std::cmp::Ordering::Equal));
-        best_n_scores.truncate(self.config.best_n_count as usize);
-        
-        // 查询成绩历史记录
-        let mut chart_histories = HashMap::new();
-        
-        let histories = query_as::<_, DbChartScoreHistory>(
-            "SELECT song_id, difficulty, score, acc, rks, is_fc, is_phi, play_time 
-             FROM chart_scores 
-             WHERE player_id = ? 
-             ORDER BY song_id, difficulty, play_time DESC"
-        )
-        .bind(player_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| AppError::DatabaseError(format!("查询历史记录失败: {}", e)))?;
-        
-        for db_history in histories {
-            let key = format!("{}-{}", db_history.song_id, db_history.difficulty);
-            let history = ChartScoreHistory {
-                score: db_history.score,
-                acc: db_history.acc,
-                rks: db_history.rks,
-                is_fc: db_history.is_fc != 0,
-                is_phi: db_history.is_phi != 0,
-                play_time: db_history.play_time,
-            };
-            
-            chart_histories.entry(key).or_insert_with(Vec::new).push(history);
-        }
-        
-        // 为每个谱面按时间倒序排序并限制数量
-        for histories in chart_histories.values_mut() {
-            histories.sort_by(|a, b| b.play_time.cmp(&a.play_time));
-            if self.config.history_max_records > 0 && histories.len() > self.config.history_max_records {
-                histories.truncate(self.config.history_max_records);
-            }
-        }
-        
-        // 获取推分ACC (如果配置启用)
-        let push_acc_map = if self.config.store_push_acc {
-            let push_accs = query!(
-                "SELECT song_id, difficulty, push_acc FROM push_acc WHERE player_id = ?",
-                player_id
-            )
+        log::debug!("缓存未命中，从数据库查询玩家[{}]存档", player_id);
+
+        // 2. 核心查询：合并玩家信息、当前成绩和历史成绩
+        let history_limit = self.config.history_max_records as i64;
+        let query_sql = "
+WITH RankedScores AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER(PARTITION BY player_id, song_id, difficulty ORDER BY play_time DESC) as history_rank
+    FROM chart_scores
+    WHERE player_id = ?1
+)
+SELECT 
+    pa.player_id,
+    pa.player_name,
+    pa.rks,
+    pa.update_time,
+    rs.song_id,
+    rs.song_name,
+    rs.difficulty,
+    rs.difficulty_value,
+    rs.score,
+    rs.acc,
+    rs.rks as score_rks,
+    rs.is_fc,
+    rs.is_phi,
+    rs.play_time,
+    rs.is_current,
+    rs.history_rank
+FROM player_archives pa
+LEFT JOIN RankedScores rs ON pa.player_id = rs.player_id
+WHERE pa.player_id = ?1 AND (rs.is_current = 1 OR rs.history_rank <= ?2 OR rs.song_id IS NULL)
+ORDER BY rs.play_time DESC;
+        ";
+
+        let rows = query_as::<_, CombinedScoreRecord>(query_sql)
+            .bind(player_id)
+            .bind(history_limit)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| AppError::DatabaseError(format!("查询推分ACC失败: {}", e)))?;
-            
-            let mut map = HashMap::new();
-            for record in push_accs {
-                let key = format!("{}-{}", record.song_id, record.difficulty);
-                map.insert(key, record.push_acc);
+            .map_err(|e| AppError::DatabaseError(format!("合并查询玩家存档失败: {}", e)))?;
+
+        if rows.is_empty() {
+            log::debug!("玩家[{}]不存在", player_id);
+            return Ok(None);
+        }
+
+        // 3. 在Rust代码中处理结果，组装成 PlayerArchive
+        let first_row = &rows[0];
+        // 如果第一个结果就没有 song_id，说明玩家存在但没有任何成绩
+        if first_row.song_id.is_none() {
+            let push_acc_map = self.get_push_acc_map(player_id).await?;
+            let archive = PlayerArchive {
+                player_id: first_row.player_id.clone(),
+                player_name: first_row.player_name.clone(),
+                rks: first_row.rks,
+                update_time: first_row.update_time,
+                best_scores: HashMap::new(),
+                best_n_scores: Vec::new(),
+                chart_histories: HashMap::new(),
+                push_acc_map,
+            };
+            let arc_archive = Arc::new(archive.clone());
+            self.cache.insert(player_id.to_string(), arc_archive).await;
+            log::debug!("玩家[{}]存在但无成绩，已存入缓存", player_id);
+            return Ok(Some(archive));
+        }
+
+        let mut best_scores = HashMap::new();
+        let mut all_current_scores = Vec::new();
+        let mut chart_histories = HashMap::new();
+
+        for row in &rows {
+            let song_id = row.song_id.clone().unwrap();
+            let difficulty = row.difficulty.clone().unwrap();
+            let key = format!("{}-{}", song_id, difficulty);
+
+            // 处理当前成绩
+            if row.is_current.unwrap_or(0) == 1 {
+                let score = ChartScore {
+                    song_id: song_id.clone(),
+                    song_name: row.song_name.clone().unwrap_or_default(),
+                    difficulty: difficulty.clone(),
+                    difficulty_value: row.difficulty_value.unwrap_or(0.0),
+                    score: row.score.unwrap_or(0.0),
+                    acc: row.acc.unwrap_or(0.0),
+                    rks: row.score_rks.unwrap_or(0.0),
+                    is_fc: row.is_fc.unwrap_or(0) != 0,
+                    is_phi: row.is_phi.unwrap_or(0) != 0,
+                    play_time: row.play_time.unwrap_or_else(Utc::now),
+                };
+                if !best_scores.contains_key(&key) {
+                    best_scores.insert(key.clone(), score.clone());
+                    all_current_scores.push(score);
+                }
             }
-            
-            if !map.is_empty() {
-                Some(map)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+
+            // 处理历史成绩
+            let history = ChartScoreHistory {
+                score: row.score.unwrap_or(0.0),
+                acc: row.acc.unwrap_or(0.0),
+                rks: row.score_rks.unwrap_or(0.0),
+                is_fc: row.is_fc.unwrap_or(0) != 0,
+                is_phi: row.is_phi.unwrap_or(0) != 0,
+                play_time: row.play_time.unwrap_or_else(Utc::now),
+            };
+            chart_histories.entry(key).or_insert_with(Vec::new).push(history);
+        }
+
+        // 获取BestN成绩
+        all_current_scores.sort_by(|a, b| b.rks.partial_cmp(&a.rks).unwrap_or(std::cmp::Ordering::Equal));
+        all_current_scores.truncate(self.config.best_n_count as usize);
         
+        // 4. 单独获取推分ACC
+        let push_acc_map = self.get_push_acc_map(player_id).await?;
+
         let archive = PlayerArchive {
-            player_id: player.player_id,
-            player_name: player.player_name,
-            rks: player.rks,
-            update_time: player.update_time,
+            player_id: first_row.player_id.clone(),
+            player_name: first_row.player_name.clone(),
+            rks: first_row.rks,
+            update_time: first_row.update_time,
             best_scores,
-            best_n_scores,
+            best_n_scores: all_current_scores,
             chart_histories,
             push_acc_map,
         };
-        
-        // 更新缓存
-        {
-            let mut cache = self.cache.lock().unwrap();
-            cache.insert(archive.player_id.clone(), (archive.clone(), Utc::now()));
-        }
-        
+
+        // 5. 更新缓存
+        let arc_archive = Arc::new(archive.clone());
+        self.cache.insert(player_id.to_string(), arc_archive).await;
+        log::debug!("玩家[{}]存档已查询并存入缓存", player_id);
+
         Ok(Some(archive))
     }
     
-    /// 更新玩家成绩
-    pub async fn update_player_score(&self, player_id: &str, player_name: &str, score: ChartScore) -> Result<(), AppError> {
-        log::info!(
-            "更新玩家[{}]成绩: 歌曲={}, 难度={}, ACC={:.2}%, RKS={:.2}", 
-            player_id, score.song_id, score.difficulty, score.acc, score.rks
-        );
-        
-        // 开始事务
-        let mut tx = self.pool.begin().await
-            .map_err(|e| AppError::DatabaseError(format!("开始事务失败: {}", e)))?;
-        
-        // 更新或插入玩家信息
-        let update_time_str = Utc::now().to_rfc3339();
-        query!(
-            "INSERT OR REPLACE INTO player_archives (player_id, player_name, rks, update_time) VALUES (?, ?, ?, ?)",
-            player_id,
-            player_name,
-            0.0, // RKS将在后续计算并更新
-            update_time_str,
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| AppError::DatabaseError(format!("更新玩家失败: {}", e)))?;
-        
-        // 将当前成绩设为非当前
-        query!(
-            "UPDATE chart_scores SET is_current = 0 WHERE player_id = ? AND song_id = ? AND difficulty = ?",
-            player_id, score.song_id, score.difficulty
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| AppError::DatabaseError(format!("更新旧成绩状态失败: {}", e)))?;
-        
-        // 插入新成绩
-        let is_fc_i32 = score.is_fc as i32;
-        let is_phi_i32 = score.is_phi as i32;
-        let play_time_str = score.play_time.to_rfc3339();
-        query!(
-            "INSERT INTO chart_scores (
-                player_id, song_id, song_name, difficulty, difficulty_value, 
-                score, acc, rks, is_fc, is_phi, play_time, is_current
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
-            player_id, 
-            score.song_id, 
-            score.song_name, 
-            score.difficulty, 
-            score.difficulty_value,
-            score.score, 
-            score.acc, 
-            score.rks, 
-            is_fc_i32,
-            is_phi_i32,
-            play_time_str,
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| AppError::DatabaseError(format!("插入新成绩失败: {}", e)))?;
-        
-        // 提交事务
-        tx.commit().await
-            .map_err(|e| AppError::DatabaseError(format!("提交事务失败: {}", e)))?;
-        
-        // 清除缓存
-        {
-            let mut cache = self.cache.lock().unwrap();
-            cache.remove(player_id);
-        }
-        
-        // 计算并更新玩家RKS
-        self.recalculate_player_rks(player_id).await?;
-        
-        // 如果配置了存储推分ACC，计算并更新
-        if self.config.store_push_acc {
-            self.recalculate_push_acc(player_id).await?;
-        }
-        
-        Ok(())
-    }
     
     /// 计算玩家RKS
     pub async fn recalculate_player_rks(&self, player_id: &str) -> Result<f64, AppError> {
@@ -323,7 +250,9 @@ impl PlayerArchiveService {
         Ok(final_rks)
     }
     
-    /// (优化后) 从RKS记录批量更新玩家成绩，并在最后计算RKS和推分ACC
+    /// (已重构) 从RKS记录批量更新玩家成绩。
+    /// - 使用事务保证操作的原子性。
+    /// - 放弃手动拼接SQL，改用循环执行预处理语句的方式进行批量插入，更安全高效。
     pub async fn update_player_scores_from_rks_records(
         &self, 
         player_id: &str, 
@@ -333,121 +262,92 @@ impl PlayerArchiveService {
     ) -> Result<(), AppError> {
         log::info!("批量更新玩家[{}] ({}) 的成绩, 共{}条记录", player_id, player_name, rks_records.len());
         
-        if rks_records.is_empty() {
-            log::warn!("RKS记录为空，无需更新玩家[{}] ({}) 的成绩", player_id, player_name);
-            // Even if no records, update the player_archives table timestamp if needed, or ensure the player exists
-            let mut tx = self.pool.begin().await
-                .map_err(|e| AppError::DatabaseError(format!("开始事务失败: {}", e)))?;
-            let update_time_str = Utc::now().to_rfc3339();
-            query!(
-                "INSERT INTO player_archives (player_id, player_name, rks, update_time) VALUES (?, ?, ?, ?) 
-                 ON CONFLICT(player_id) DO UPDATE SET player_name = excluded.player_name, update_time = excluded.update_time",
-                player_id,
-                player_name,
-                0.0, // Default RKS, will be recalculated if scores exist
-                update_time_str,
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| AppError::DatabaseError(format!("更新玩家信息失败: {}", e)))?;
-            tx.commit().await.map_err(|e| AppError::DatabaseError(format!("提交事务失败: {}", e)))?;
-            return Ok(());
-        }
-        
-        // 开始事务
         let mut tx = self.pool.begin().await
             .map_err(|e| AppError::DatabaseError(format!("开始事务失败: {}", e)))?;
-            
-        // 1. 更新或插入玩家信息
+        
         let update_time = Utc::now();
-        let update_time_str = update_time.to_rfc3339();
+
+        // 1. 更新或插入玩家信息
         query!(
              "INSERT INTO player_archives (player_id, player_name, rks, update_time) VALUES (?, ?, ?, ?) 
               ON CONFLICT(player_id) DO UPDATE SET player_name = excluded.player_name, update_time = excluded.update_time",
              player_id,
              player_name,
              0.0, // RKS将在后面重新计算
-             update_time_str,
+             update_time,
          )
          .execute(&mut *tx)
          .await
          .map_err(|e| AppError::DatabaseError(format!("更新玩家信息失败: {}", e)))?;
 
+        if rks_records.is_empty() {
+            log::warn!("RKS记录为空，仅更新玩家[{}] ({}) 的信息和时间戳", player_id, player_name);
+            tx.commit().await.map_err(|e| AppError::DatabaseError(format!("提交事务失败: {}", e)))?;
+            return Ok(());
+        }
+
         // 2. 将该玩家所有谱面的 is_current 设为 0
-        // 这样做比逐个更新更高效，即使某些谱面没有新记录
-        query!(
-            "UPDATE chart_scores SET is_current = 0 WHERE player_id = ?",
-            player_id
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| AppError::DatabaseError(format!("重置旧成绩状态失败: {}", e)))?;
-
-        // 3. 批量插入新的当前成绩
-        log::debug!("开始批量插入 {} 条新成绩记录...", rks_records.len());
-        let mut sql = String::from("INSERT INTO chart_scores (player_id, song_id, song_name, difficulty, difficulty_value, score, acc, rks, is_fc, is_phi, play_time, is_current) VALUES ");
-        let mut bindings = Vec::new();
-        for (i, record) in rks_records.iter().enumerate() {
-            if i > 0 {
-                sql.push_str(", ");
-            }
-            sql.push_str("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
-            let key = format!("{}-{}", record.song_id, record.difficulty);
-            let is_fc = fc_map.get(&key).copied().unwrap_or(false);
-            let is_phi = record.acc >= 100.0;
-            
-            bindings.push(player_id.to_string());
-            bindings.push(record.song_id.clone());
-            bindings.push(record.song_name.clone());
-            bindings.push(record.difficulty.clone());
-            bindings.push(record.difficulty_value.to_string());
-            bindings.push(record.score.unwrap_or(0.0).to_string());
-            bindings.push(record.acc.to_string());
-            bindings.push(record.rks.to_string());
-            bindings.push((is_fc as i32).to_string());
-            bindings.push((is_phi as i32).to_string());
-            bindings.push(update_time.to_rfc3339());
-        }
-
-        let mut q = query(&sql);
-        for binding in &bindings {
-            q = q.bind(binding);
-        }
-
-        q.execute(&mut *tx)
+        query!("UPDATE chart_scores SET is_current = 0 WHERE player_id = ?", player_id)
+            .execute(&mut *tx)
             .await
-            .map_err(|e| AppError::DatabaseError(format!("批量插入成绩失败: {}", e)))?;
+            .map_err(|e| AppError::DatabaseError(format!("重置旧成绩状态失败: {}", e)))?;
 
+        // 3. 循环插入新的当前成绩
+        log::debug!("开始批量插入 {} 条新成绩记录...", rks_records.len());
+        let insert_sql = "
+            INSERT INTO chart_scores 
+            (player_id, song_id, song_name, difficulty, difficulty_value, score, acc, rks, is_fc, is_phi, play_time, is_current) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        ";
+
+        for record in rks_records {
+            let key = format!("{}-{}", record.song_id, record.difficulty);
+            let is_fc = fc_map.get(&key).copied().unwrap_or(false) as i32;
+            let is_phi = (record.acc >= 100.0) as i32;
+            
+            query(insert_sql)
+                .bind(player_id)
+                .bind(&record.song_id)
+                .bind(&record.song_name)
+                .bind(&record.difficulty)
+                .bind(record.difficulty_value)
+                .bind(record.score.unwrap_or(0.0))
+                .bind(record.acc)
+                .bind(record.rks)
+                .bind(is_fc)
+                .bind(is_phi)
+                .bind(update_time)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| AppError::DatabaseError(format!("批量插入成绩失败: song_id={}, {}", record.song_id, e)))?;
+        }
         log::debug!("批量插入完成");
         
         // 提交事务
         tx.commit().await
             .map_err(|e| AppError::DatabaseError(format!("提交事务失败: {}", e)))?;
         
-        // 4. 在所有数据库操作完成后，计算并更新玩家RKS
-        log::info!("成绩批量更新完成，开始重新计算玩家[{}] ({}) 的 RKS...", player_id, player_name);
-        match self.recalculate_player_rks(player_id).await {
-             Ok(new_rks) => log::info!("玩家[{}] ({}) RKS 更新为: {:.4}", player_id, player_name, new_rks),
-             Err(e) => log::error!("重新计算玩家[{}] ({}) RKS 失败: {}", player_id, player_name, e),
-             // Continue even if RKS recalculation fails
-        }
-        
-        // 5. 计算并更新推分ACC (如果启用)
-        if self.config.store_push_acc {
-             log::info!("开始重新计算玩家[{}] ({}) 的推分 ACC...", player_id, player_name);
-             match self.recalculate_push_acc(player_id).await {
-                 Ok(_) => log::info!("玩家[{}] ({}) 推分 ACC 更新完成", player_id, player_name),
-                 Err(e) => log::error!("重新计算玩家[{}] ({}) 推分 ACC 失败: {}", player_id, player_name, e),
-                 // Continue even if push acc recalculation fails
-             }
-        }
+        // 4. 在所有数据库操作完成后，异步计算并更新玩家RKS和推分ACC
+        let self_clone = self.clone();
+        let player_id_clone = player_id.to_string();
+        let player_name_clone = player_name.to_string();
+        tokio::spawn(async move {
+            log::info!("成绩批量更新完成，开始异步重新计算玩家[{}] ({}) 的 RKS...", player_id_clone, player_name_clone);
+            if let Err(e) = self_clone.recalculate_player_rks(&player_id_clone).await {
+                log::error!("异步重新计算玩家[{}] ({}) RKS 失败: {}", player_id_clone, player_name_clone, e);
+            }
+            
+            if self_clone.config.store_push_acc {
+                log::info!("开始异步重新计算玩家[{}] ({}) 的推分 ACC...", player_id_clone, player_name_clone);
+                if let Err(e) = self_clone.recalculate_push_acc(&player_id_clone).await {
+                    log::error!("异步重新计算玩家[{}] ({}) 推分 ACC 失败: {}", player_id_clone, player_name_clone, e);
+                }
+            }
+        });
 
-        // 清除缓存
-        {
-            let mut cache = self.cache.lock().unwrap();
-            cache.remove(player_id);
-            log::debug!("玩家[{}] ({}) 缓存已清除", player_id, player_name);
-        }
+        // 5. 清除缓存
+        self.cache.invalidate(player_id).await;
+        log::debug!("玩家[{}] ({}) 缓存已清除", player_id, player_name);
         
         Ok(())
     }
@@ -462,7 +362,7 @@ impl PlayerArchiveService {
             .ok_or_else(|| AppError::DatabaseError(format!("玩家不存在: {}", player_id)))?;
         
         // 获取所有当前成绩用于推分计算
-        let all_scores = query_as::<_, DbChartScore>(
+        let all_scores: Vec<ChartScore> = query_as(
             "SELECT song_id, song_name, difficulty, difficulty_value, score, acc, rks, is_fc, is_phi, play_time 
              FROM chart_scores 
              WHERE player_id = ? AND is_current = 1"
@@ -554,47 +454,7 @@ impl PlayerArchiveService {
         }
         
         // 清除缓存
-        {
-            let mut cache = self.cache.lock().unwrap();
-            cache.remove(player_id);
-        }
-        
-        Ok(())
-    }
-    
-    // 删除玩家存档
-    pub async fn delete_player_archive(&self, player_id: &str) -> Result<(), AppError> {
-        log::info!("删除玩家[{}]存档", player_id);
-        
-        let mut tx = self.pool.begin().await
-            .map_err(|e| AppError::DatabaseError(format!("开始事务失败: {}", e)))?;
-        
-        // 删除玩家信息
-        query!("DELETE FROM player_archives WHERE player_id = ?", player_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| AppError::DatabaseError(format!("删除玩家信息失败: {}", e)))?;
-        
-        // 删除玩家成绩
-        query!("DELETE FROM chart_scores WHERE player_id = ?", player_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| AppError::DatabaseError(format!("删除玩家成绩失败: {}", e)))?;
-        
-        // 删除推分ACC
-        query!("DELETE FROM push_acc WHERE player_id = ?", player_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| AppError::DatabaseError(format!("删除推分ACC记录失败: {}", e)))?;
-        
-        tx.commit().await
-            .map_err(|e| AppError::DatabaseError(format!("提交事务失败: {}", e)))?;
-        
-        // 清除缓存
-        {
-            let mut cache = self.cache.lock().unwrap();
-            cache.remove(player_id);
-        }
+        self.cache.invalidate(player_id).await;
         
         Ok(())
     }
@@ -645,138 +505,54 @@ impl PlayerArchiveService {
         Ok(ranking_entries)
     }
 
-    pub async fn get_player_best_scores(
-        &self,
-        player_id: &str,
-        _n: Option<usize>,
-    ) -> Result<Vec<ChartScore>, AppError> {
-        let _archive = self.get_player_archive(player_id).await?;
-        // ... rest of the function ...
-        let scores = query_as::<_, DbChartScore>(
-            "SELECT song_id, song_name, difficulty, difficulty_value, score, acc, rks, is_fc, is_phi, play_time 
-             FROM chart_scores 
-             WHERE player_id = ? AND is_current = 1"
+    /// 辅助函数：获取推分ACC
+    async fn get_push_acc_map(&self, player_id: &str) -> Result<Option<HashMap<String, f64>>, AppError> {
+        if !self.config.store_push_acc {
+            return Ok(None);
+        }
+
+        let push_accs = query!(
+            "SELECT song_id, difficulty, push_acc FROM push_acc WHERE player_id = ?",
+            player_id
         )
-        .bind(player_id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| AppError::DatabaseError(format!("查询成绩失败: {}", e)))?;
-
-        let result_scores = scores.into_iter().map(|db_score| ChartScore {
-            song_id: db_score.song_id,
-            song_name: db_score.song_name,
-            difficulty: db_score.difficulty,
-            difficulty_value: db_score.difficulty_value,
-            score: db_score.score,
-            acc: db_score.acc,
-            rks: db_score.rks,
-            is_fc: db_score.is_fc != 0,
-            is_phi: db_score.is_phi != 0,
-            play_time: db_score.play_time,
-        }).collect();
+        .map_err(|e| AppError::DatabaseError(format!("查询推分ACC失败: {}", e)))?;
         
-        Ok(result_scores)
+        if push_accs.is_empty() {
+            return Ok(None);
+        }
+
+        let mut map = HashMap::new();
+        for record in push_accs {
+            let key = format!("{}-{}", record.song_id, record.difficulty);
+            map.insert(key, record.push_acc);
+        }
+        
+        Ok(Some(map))
     }
 }
-
-// 数据库模型，用于从数据库查询结果映射
-#[derive(sqlx::FromRow)]
-struct DbChartScore {
-    song_id: String,
-    song_name: String,
-    difficulty: String,
-    difficulty_value: f64,
-    score: f64,
-    acc: f64,
-    rks: f64,
-    is_fc: i32,
-    is_phi: i32,
-    play_time: DateTime<Utc>,
-}
-
-#[derive(sqlx::FromRow)]
-struct DbChartScoreHistory {
-    song_id: String,
-    difficulty: String,
-    score: f64,
-    acc: f64,
-    rks: f64,
-    is_fc: i32,
-    is_phi: i32,
-    play_time: DateTime<Utc>,
-}
-
-// Temporary struct for querying basic ranking info
-#[derive(sqlx::FromRow, Debug)]
-struct BasicRankingInfo {
+    
+// 用于合并查询结果的数据库模型
+#[derive(sqlx::FromRow, Clone)]
+struct CombinedScoreRecord {
+    // 玩家信息
     player_id: String,
     player_name: String,
     rks: f64,
-    update_time: String, // Query as String first
+    update_time: DateTime<Utc>,
+    // 成绩信息 (由于是LEFT JOIN, 可能为NULL)
+    song_id: Option<String>,
+    song_name: Option<String>,
+    difficulty: Option<String>,
+    difficulty_value: Option<f64>,
+    score: Option<f64>,
+    acc: Option<f64>,
+    score_rks: Option<f64>, // 重命名以避免与玩家rks冲突
+    is_fc: Option<i32>,
+    is_phi: Option<i32>,
+    play_time: Option<DateTime<Utc>>,
+    is_current: Option<i32>,
+    history_rank: Option<i64>,
 }
 
-// 使用示例
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
-    
-    /// 示例：如何使用玩家存档服务
-    #[tokio::test]
-    async fn test_player_archive_service() {
-        // 使用内存数据库进行测试
-        let pool = SqlitePoolOptions::new()
-            .max_connections(5)
-            .connect("sqlite::memory:")
-            .await
-            .expect("Failed to connect to in-memory database");
-        
-        // 创建玩家存档服务并初始化表
-        let config = ArchiveConfig {
-            store_push_acc: true,
-            best_n_count: 27,
-            history_max_records: 10,
-        };
-        let service = PlayerArchiveService::new(pool, Some(config));
-        service.init_tables().await.expect("Failed to initialize tables");
-        
-        // 创建一些测试数据
-        let player_id = "test_player_123";
-        let player_name = "测试玩家";
-        
-        // 创建一个成绩
-        let score = ChartScore {
-            song_id: "song123".to_string(),
-            song_name: "测试歌曲".to_string(),
-            difficulty: "IN".to_string(),
-            difficulty_value: 15.5,
-            score: 999300.0,
-            acc: 98.3,
-            rks: 14.72,
-            is_fc: true,
-            is_phi: false,
-            play_time: Utc::now(),
-        };
-        
-        // 更新玩家成绩
-        service.update_player_score(player_id, player_name, score).await.expect("Failed to update score");
-        
-        // 获取玩家存档
-        let archive = service.get_player_archive(player_id).await.expect("Failed to get archive");
-        
-        if let Some(archive) = archive {
-            println!("玩家RKS: {:.2}", archive.rks);
-            println!("最佳成绩数量: {}", archive.best_scores.len());
-            
-            // 使用推分ACC信息
-            if let Some(push_acc_map) = &archive.push_acc_map {
-                for (key, acc) in push_acc_map {
-                    println!("{} 需要提升至 {:.2}%", key, acc);
-                }
-            }
-        }
-        
-        // 删除玩家存档
-        service.delete_player_archive(player_id).await.expect("Failed to delete archive");
-    }
-} 

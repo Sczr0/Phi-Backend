@@ -1,7 +1,6 @@
 use anyhow::Result;
 use base64::prelude::{BASE64_STANDARD, Engine as _};
 use hmac::Mac;
-use percent_encoding::{NON_ALPHANUMERIC, percent_encode};
 use rand::{RngCore, SeedableRng};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};

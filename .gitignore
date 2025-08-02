@@ -17,3 +17,7 @@ Thumbs.db
 /phi-backend-service/
 
 /html
+
+/.codebuddy/analysis-summary.json
+
+phi-backend-rust.exe
