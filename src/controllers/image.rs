@@ -1,5 +1,7 @@
 use actix_web::{post, get, web, HttpResponse, Result};
-use serde::{Deserialize/*, Serialize*/};
+use serde::Deserialize;
+use utoipa::{ToSchema, IntoParams};
+
 use crate::models::user::IdentifierRequest;
 use crate::services::image_service::{ImageService};
 use crate::services::phigros::PhigrosService;
@@ -8,16 +10,32 @@ use crate::services::song::SongService;
 use crate::services::player_archive_service::PlayerArchiveService;
 use crate::utils::error::AppError;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, ToSchema, IntoParams)]
 pub struct SongImageQuery {
+    /// 歌曲的名称、ID或别名
     q: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
 pub struct LeaderboardQuery {
+    /// 返回的排行榜条目数量，默认为10
     pub limit: Option<usize>,
 }
 
+/// 生成Best N成绩图片
+///
+/// 根据用户的RKS计算结果，生成一张包含其最好N项成绩的图片。
+#[utoipa::path(
+    post,
+    path = "/bn/{n}",
+    params(
+        ("n" = u32, Path, description = "要生成的Best N图片")
+    ),
+    request_body = IdentifierRequest,
+    responses(
+        (status = 200, description = "成功生成图片", content_type = "image/png", body = Vec<u8>)
+    )
+)]
 #[post("/bn/{n}")]
 pub async fn generate_bn_image(
     path: web::Path<u32>,
@@ -25,19 +43,17 @@ pub async fn generate_bn_image(
     phigros_service: web::Data<PhigrosService>,
     user_service: web::Data<UserService>,
     player_archive_service: web::Data<PlayerArchiveService>,
-    image_service: web::Data<ImageService>, // 新增
+    image_service: web::Data<ImageService>,
 ) -> Result<HttpResponse, AppError> {
     let n = path.into_inner();
     
-    // 验证 n 的有效性
     if n == 0 {
         return Err(AppError::BadRequest("N must be greater than 0".to_string()));
     }
     
-    // 调用服务时传递注入的服务实例，直接传递 req
     let image_bytes = image_service.generate_bn_image(
         n,
-        req, // Pass req directly
+        req,
         phigros_service,
         user_service,
         player_archive_service
@@ -48,6 +64,18 @@ pub async fn generate_bn_image(
         .body(image_bytes))
 }
 
+/// 生成单曲成绩图片
+///
+/// 根据用户成绩和歌曲信息，生成一张包含单曲成绩详情的图片。
+#[utoipa::path(
+    post,
+    path = "/song",
+    params(SongImageQuery),
+    request_body = IdentifierRequest,
+    responses(
+        (status = 200, description = "成功生成图片", content_type = "image/png", body = Vec<u8>)
+    )
+)]
 #[post("/song")]
 pub async fn generate_song_image(
     query: web::Query<SongImageQuery>,
@@ -56,14 +84,13 @@ pub async fn generate_song_image(
     user_service: web::Data<UserService>,
     song_service: web::Data<SongService>,
     player_archive_service: web::Data<PlayerArchiveService>,
-    image_service: web::Data<ImageService>, // 新增
+    image_service: web::Data<ImageService>,
 ) -> Result<HttpResponse, AppError> {
     let song_query = query.into_inner().q;
 
-    // 调用新的服务函数来生成图片，直接传递 req
     let image_bytes = image_service.generate_song_image(
         song_query,
-        req, // Pass req directly
+        req,
         phigros_service,
         user_service,
         song_service,
@@ -77,11 +104,21 @@ pub async fn generate_song_image(
 }
 
 /// RKS排行榜图片
+///
+/// 生成一张包含全服玩家RKS排行榜的图片。
+#[utoipa::path(
+    get,
+    path = "/leaderboard/rks",
+    params(LeaderboardQuery),
+    responses(
+        (status = 200, description = "成功生成排行榜图片", content_type = "image/png", body = Vec<u8>)
+    )
+)]
 #[get("/leaderboard/rks")]
 pub async fn get_rks_leaderboard(
     query: web::Query<LeaderboardQuery>,
     player_archive_service: web::Data<PlayerArchiveService>,
-    image_service: web::Data<ImageService>, // 新增
+    image_service: web::Data<ImageService>,
 ) -> Result<HttpResponse, AppError> {
     let result = image_service.generate_rks_leaderboard_image(
         query.limit,
@@ -92,4 +129,4 @@ pub async fn get_rks_leaderboard(
     Ok(HttpResponse::Ok()
         .content_type("image/png")
         .body(result))
-} 
+}

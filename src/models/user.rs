@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use chrono::{DateTime, Utc};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct UserProfile {
     #[serde(rename = "objectId")]
     pub object_id: String,
     pub nickname: String,
-    // 可以根据需要添加其他从 /users/me 返回的字段
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -51,19 +51,19 @@ impl PlatformBinding {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TokenRequest {
     pub token: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BindRequest {
     pub platform: String,
     pub platform_id: String,
     pub token: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IdentifierRequest {
     pub token: Option<String>,
     pub platform: Option<String>,
@@ -71,7 +71,7 @@ pub struct IdentifierRequest {
     pub verification_code: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UnbindInitiateResponse {
     pub verification_code: String,
     pub expires_in_seconds: u64,
@@ -86,13 +86,13 @@ pub struct UnbindVerificationCode {
     pub expires_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TokenListResponse {
     pub internal_id: String,
     pub bindings: Vec<PlatformBindingInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PlatformBindingInfo {
     pub platform: String,
     pub platform_id: String,
@@ -100,10 +100,13 @@ pub struct PlatformBindingInfo {
     pub bind_time: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ApiResponse<T> {
     pub code: u32,
     pub status: String,
     pub message: Option<String>,
+    // 使用 value_type = Object 来告诉 utoipa 将泛型 T 视为一个通用的 JSON 对象。
+    // 这避免了要求所有可能的 T 都必须实现 ToSchema 的问题，特别是在处理动态数据时。
+    #[schema(value_type = Object)]
     pub data: Option<T>,
-} 
+}

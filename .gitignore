@@ -9,6 +9,7 @@ phigros_bindings.db
 .idea/
 .vscode/
 .cursor/
+.codebuddy/
 
 # OS specific files
 .DS_Store
@@ -18,6 +19,8 @@ Thumbs.db
 
 /html
 
-/.codebuddy/analysis-summary.json
+
 
 phi-backend-rust.exe
+
+/重构

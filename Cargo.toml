@@ -80,6 +80,10 @@ rayon = "1.10.0"
 moka = { version = "0.12", features = ["future"] }
 askama = "0.12"
 
+# API文档
+utoipa = { version = "4.2.0", features = ["actix_extras"] }
+utoipa-swagger-ui = { version = "7.1.0", features = ["actix-web"] }
+
 [features]
 default = []
 

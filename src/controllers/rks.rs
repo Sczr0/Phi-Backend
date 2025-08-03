@@ -1,7 +1,9 @@
 use actix_web::{post, web, HttpResponse};
 use std::collections::HashMap;
+use log::debug;
+use utoipa;
 
-use crate::models::{ApiResponse, IdentifierRequest};
+use crate::models::{user::{ApiResponse, IdentifierRequest}, rks::{RksResult, RksRecord}};
 use crate::services::phigros::PhigrosService;
 use crate::services::user::UserService;
 use crate::services::player_archive_service::PlayerArchiveService;
@@ -10,6 +12,17 @@ use crate::utils::save_parser::check_session_token;
 use crate::utils::token_helper::resolve_token;
 use tokio;
 
+/// 计算并返回玩家的RKS及b19和r10成绩
+///
+/// 此接口会计算用户的RKS，并可选择性地将玩家的最新成绩存档到数据库中。
+#[utoipa::path(
+    post,
+    path = "/rks",
+    request_body = IdentifierRequest,
+    responses(
+        (status = 200, description = "成功计算RKS", body = ApiResponse<RksResult>)
+    )
+)]
 #[post("/rks")]
 pub async fn get_rks(
     req: web::Json<IdentifierRequest>,
@@ -17,23 +30,16 @@ pub async fn get_rks(
     user_service: web::Data<UserService>,
     player_archive_service: web::Data<PlayerArchiveService>,
 ) -> AppResult<HttpResponse> {
-    // 解析并获取有效的 SessionToken
     let token = resolve_token(&req, &user_service).await?;
-    
-    // 检查会话令牌
     check_session_token(&token)?;
     
-    // (优化后) 并行获取 RKS列表+存档 和 Profile
     let (rks_save_res, profile_res) = tokio::join!(
-        phigros_service.get_rks(&token), // get_rks 现在返回 (RksResult, GameSave)
+        phigros_service.get_rks(&token),
         phigros_service.get_profile(&token)
     );
 
-    // 解包结果
     let (rks_result, save) = rks_save_res?;
-    // let save = save_res?; // 不再需要单独获取 save
 
-    // 获取玩家ID和昵称 (使用从 get_rks 返回的 save)
     let player_id = save.user.as_ref()
         .and_then(|u| u.get("objectId"))
         .and_then(|v| v.as_str())
@@ -47,7 +53,6 @@ pub async fn get_rks(
         }
     };
 
-    // 从存档构建 FC Map
     let mut fc_map = HashMap::new();
     if let Some(game_record_map) = &save.game_record {
         for (song_id, difficulties) in game_record_map {
@@ -60,7 +65,6 @@ pub async fn get_rks(
         }
     }
 
-    // 更新数据库中的玩家存档和 RKS (异步执行)
     let archive_service_clone = player_archive_service.clone();
     let player_id_clone = player_id.clone();
     let player_name_clone = player_name.clone();
@@ -80,7 +84,6 @@ pub async fn get_rks(
         }
     });
 
-    // 注意：API 仍然只返回 RksResult
     Ok(HttpResponse::Ok().json(ApiResponse {
         code: 200,
         status: "ok".to_string(),
@@ -88,3 +91,51 @@ pub async fn get_rks(
         data: Some(rks_result), 
     }))
 } 
+
+/// 获取玩家最好的N项成绩
+///
+/// 根据计算出的RKS，返回玩家分数最高的N条记录。
+#[utoipa::path(
+    post,
+    path = "/bn/{n}",
+    params(
+        ("n" = u32, Path, description = "要获取的最高成绩数量")
+    ),
+    request_body = IdentifierRequest,
+    responses(
+        (status = 200, description = "成功获取B<n>成绩", body = ApiResponse<Vec<RksRecord>>),
+        (status = 400, description = "无效的n值")
+    )
+)]
+#[post("/bn/{n}")]
+pub async fn get_bn(
+    n: web::Path<u32>,
+    req: web::Json<IdentifierRequest>,
+    phigros_service: web::Data<PhigrosService>,
+    user_service: web::Data<UserService>,
+) -> AppResult<HttpResponse> {
+    let n = n.into_inner();
+    debug!("接收到B{}查询请求", n);
+    
+    if n == 0 {
+        return Ok(HttpResponse::Ok().json(ApiResponse {
+            code: 400,
+            status: "ERROR".to_string(),
+            message: Some("参数n必须大于0".to_string()),
+            data: None::<Vec<()>>,
+        }));
+    }
+    
+    let token = resolve_token(&req, &user_service).await?;
+    
+    let (rks_result, _) = phigros_service.get_rks(&token).await?;
+    
+    let bn = rks_result.records.into_iter().take(n as usize).collect::<Vec<_>>();
+    
+    Ok(HttpResponse::Ok().json(ApiResponse {
+        code: 200,
+        status: "OK".to_string(),
+        message: None,
+        data: Some(bn),
+    }))
+}

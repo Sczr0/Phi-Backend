@@ -1,5 +1,5 @@
 use actix_web::web;
-use crate::models::IdentifierRequest;
+use crate::models::user::IdentifierRequest;
 use crate::services::user::UserService;
 use crate::utils::error::{AppError, AppResult};
 
@@ -82,4 +82,4 @@ pub async fn resolve_internal_id(
         },
         Err(e) => Err(e)
     }
-} 
+}

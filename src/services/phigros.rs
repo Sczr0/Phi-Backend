@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 use reqwest::Client;
-use crate::models::{GameSave, RksResult, SongRecord};
+use crate::models::save::{GameSave, SongRecord};
+use crate::models::rks::RksResult;
+use crate::models::user::UserProfile;
 use crate::utils::error::{AppError, AppResult};
 use crate::utils::save_parser::{parse_save, parse_save_with_difficulty};
-
-// 导入UserProfile模型
-use crate::models::UserProfile;
 
 // Phigros API相关的常量
 const BASE_URL: &str = "https://rak3ffdi.cloud.tds1.tapapis.cn/1.1/";
@@ -29,54 +28,43 @@ impl PhigrosService {
     
     // 获取存档数据并解析
     pub async fn get_save(&self, token: &str) -> AppResult<GameSave> {
-        // 获取游戏存档
         let save_data = self.fetch_save(token).await?;
-        
-        // 解析存档
         parse_save(&save_data)
     }
     
     // 获取存档数据并解析，添加难度和RKS信息
     pub async fn get_save_with_difficulty(&self, token: &str) -> AppResult<GameSave> {
-        // 获取游戏存档
         let save_data = self.fetch_save(token).await?;
-        
-        // 解析存档并添加难度和RKS信息
         parse_save_with_difficulty(&save_data)
     }
     
     // (优化后) 获取RKS计算结果，并同时返回用于计算的GameSave
-    pub async fn get_rks(&self, token: &str) -> AppResult<(RksResult, GameSave)> { // 返回元组
+    pub async fn get_rks(&self, token: &str) -> AppResult<(RksResult, GameSave)> {
         log::debug!("进入 get_rks 服务函数 (优化版)");
-        // 获取带难度信息的存档 (只获取一次)
         let save = self.get_save_with_difficulty(token).await?;
         log::debug!("get_rks: 已获取带难度信息的存档");
         
-        // --- 从存档记录中提取并计算 RKS 记录 --- 
         let game_record = save.game_record.as_ref()
             .ok_or_else(|| AppError::Other("没有游戏记录数据".to_string()))?;
         log::debug!("get_rks: 从存档中获取 GameRecord，包含 {} 首歌曲", game_record.len());
         
         let mut rks_records = Vec::new();
         
-        // 遍历所有歌曲记录
         log::debug!("get_rks: 开始遍历 GameRecord 并创建 RksRecord 列表...");
         for (song_id, difficulties) in game_record {
             let song_name = crate::utils::data_loader::get_song_name_by_id(song_id)
                 .unwrap_or_else(|| song_id.clone());
             
-            // 遍历所有难度记录
             for (diff_name, record) in difficulties {
-                // 确保有 acc 和 difficulty 值
                 if let (Some(acc), Some(difficulty)) = (record.acc, record.difficulty) {
-                    if acc >= 70.0 && difficulty > 0.0 { // 只考虑有效成绩
+                    if acc >= 70.0 && difficulty > 0.0 {
                          log::trace!("get_rks: 为 '{}' - '{}' 创建 RksRecord", song_id, diff_name);
-                        let rks_record = crate::models::RksRecord::new(
+                        let rks_record = crate::models::rks::RksRecord::new(
                             song_id.clone(),
                             song_name.clone(),
                             diff_name.clone(),
                             difficulty,
-                            record, // 传递 SongRecord 引用
+                            record,
                         );
                         rks_records.push(rks_record);
                     }
@@ -84,33 +72,26 @@ impl PhigrosService {
             }
         }
         log::debug!("get_rks: 共创建了 {} 条 RksRecord", rks_records.len());
-        // --- 结束 RKS 记录提取 ---
 
-        // 使用 RksResult::new 来排序并包装记录
         log::debug!("get_rks: 调用 RksResult::new 进行排序和包装...");
         let result = RksResult::new(rks_records);
         log::debug!("get_rks: RksResult 创建完成，包含 {} 条记录", result.records.len());
         
-        // 返回 RksResult 和 GameSave
         Ok((result, save)) 
     }
     
     // 获取特定歌曲的成绩
     pub async fn get_song_record(&self, token: &str, song_id: &str, difficulty: Option<&str>) -> AppResult<HashMap<String, SongRecord>> {
-        // 获取带难度信息的存档
         let save = self.get_save_with_difficulty(token).await?;
         
-        // 从存档中查找歌曲成绩
         let game_record = save.game_record.ok_or_else(|| AppError::Other("没有游戏记录数据".to_string()))?;
         
         let song_records = game_record.get(song_id)
             .ok_or_else(|| AppError::SongNotFound(song_id.to_string()))?;
         
-        // 如果指定了难度，只返回该难度的成绩
         if let Some(diff) = difficulty {
             let mut result = HashMap::new();
             
-            // 尝试获取指定难度的成绩
             let record = song_records.get(diff)
                 .ok_or_else(|| AppError::Other(format!("没有找到歌曲 {} 的 {} 难度记录", song_id, diff)))?;
             
@@ -118,18 +99,15 @@ impl PhigrosService {
             return Ok(result);
         }
         
-        // 否则返回所有难度的成绩
         Ok(song_records.clone())
     }
     
     // 从Phigros云端获取存档数据
     async fn fetch_save(&self, token: &str) -> AppResult<Vec<u8>> {
-        // 获取存档摘要，以获取存档URL
         log::debug!("开始获取存档摘要...");
         let summary = self.fetch_summary(token).await?;
         log::debug!("成功获取存档摘要");
         
-        // 获取存档URL和校验和
         let url = summary["results"][0]["gameFile"]["url"].as_str()
             .ok_or_else(|| AppError::Other("无法获取存档URL".to_string()))?;
         log::debug!("获取到存档 URL: {}", url);
@@ -138,18 +116,15 @@ impl PhigrosService {
             .ok_or_else(|| AppError::Other("无法获取存档校验和".to_string()))?;
         log::debug!("获取到预期校验和: {}", expected_checksum);
         
-        // 下载存档数据
         log::debug!("开始下载存档数据...");
         let save_data = self.download_save(url).await?;
         log::debug!("成功下载存档数据，大小: {} 字节", save_data.len());
         
-        // 检查存档大小
         if save_data.len() <= 30 {
             log::error!("存档大小不足 30 字节 ({})，可能已损坏或获取失败", save_data.len());
             return Err(AppError::InvalidSaveSize(save_data.len()));
         }
         
-        // 计算并验证校验和
         let actual_checksum = self.calculate_checksum(&save_data);
         log::debug!("计算出的实际校验和: {}", actual_checksum);
         if expected_checksum != actual_checksum {
@@ -249,4 +224,4 @@ impl PhigrosService {
             }
         }
     }
-} 
+}

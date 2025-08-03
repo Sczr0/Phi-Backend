@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
-// use std::collections::HashMap; // 移除未使用的导入
+use utoipa::ToSchema;
 
 // Placeholder for predictions module - 现在添加实际定义
 
-#[derive(Debug, Serialize, Deserialize, Clone)] // 添加 Deserialize 用于加载，Serialize 用于响应，Debug 和 Clone 用于方便性
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct PredictedConstants {
     pub ez: Option<f32>,
     pub hd: Option<f32>,
@@ -11,9 +11,9 @@ pub struct PredictedConstants {
     pub at: Option<f32>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)] // 添加 Serialize 用于响应，Debug, Deserialize 和 Clone 用于方便性
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct PredictionResponse {
     pub song_id: String,
     pub difficulty: String,
     pub predicted_constant: Option<f32>,
-} 
+}

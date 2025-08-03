@@ -1,5 +1,5 @@
 use crate::models::rks::RksRecord;
-use crate::models::IdentifierRequest;
+use crate::models::user::IdentifierRequest;
 use crate::services::phigros::PhigrosService;
 use crate::services::user::UserService;
 use crate::services::song::SongService;

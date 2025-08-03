@@ -7,12 +7,13 @@ use base64::{engine::general_purpose, Engine as _};
 use uuid::Uuid;
 use crate::services::taptap::{TapTapService, TapTapQrCodeResponse};
 use lazy_static::lazy_static;
+use utoipa::{ToSchema, path};
 
 lazy_static! {
     static ref QR_CODE_STORE: Mutex<HashMap<String, QrCodeState>> = Mutex::new(HashMap::new());
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct QrCodeState {
     #[serde(rename = "deviceCode")]
     pub device_code: String,
@@ -25,7 +26,7 @@ pub struct QrCodeState {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GenerateQrCodeResponse {
     #[serde(rename = "qrId")]
     pub qr_id: String,
@@ -33,7 +34,7 @@ pub struct GenerateQrCodeResponse {
     pub qr_code_image: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CheckQrStatusResponse {
     pub status: String,
     #[serde(rename = "sessionToken", skip_serializing_if = "Option::is_none")]
@@ -42,6 +43,17 @@ pub struct CheckQrStatusResponse {
     pub message: Option<String>,
 }
 
+/// 生成用于扫码登录的二维码
+///
+/// 返回一个唯一的 qr_id 和一个 base64 编码的 PNG 图片。
+#[utoipa::path(
+    get,
+    path = "/auth/qrcode",
+    responses(
+        (status = 200, description = "成功生成二维码", body = GenerateQrCodeResponse),
+        (status = 500, description = "生成二维码失败")
+    )
+)]
 pub async fn generate_qr_code() -> impl Responder {
     let taptap_service = TapTapService::new();
     let device_id = Uuid::new_v4().to_string().replace("-", "");
@@ -58,7 +70,6 @@ pub async fn generate_qr_code() -> impl Responder {
                 created_at: chrono::Utc::now(),
             });
 
-            // 设置一个超时时间，比如 5 分钟后自动清理
             let qr_id_clone = qr_id.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
@@ -88,10 +99,25 @@ pub async fn generate_qr_code() -> impl Responder {
     }
 }
 
+/// 检查二维码扫码状态
+///
+/// 客户端应轮询此接口以检查登录状态。
+/// 状态可能为: pending, scanned, success, expired。
+#[utoipa::path(
+    get,
+    path = "/auth/qrcode/{qrId}/status",
+    params(
+        ("qrId" = String, Path, description = "由 /auth/qrcode 返回的唯一ID")
+    ),
+    responses(
+        (status = 200, description = "成功获取状态", body = CheckQrStatusResponse),
+        (status = 404, description = "QR Code 不存在或已过期")
+    )
+)]
 pub async fn check_qr_status(path: web::Path<String>) -> impl Responder {
     let qr_id = path.into_inner();
     let mut store = QR_CODE_STORE.lock().unwrap();
-    let stored_data_option = store.get(&qr_id).cloned(); // Clone to release lock early
+    let stored_data_option = store.get(&qr_id).cloned();
 
     if stored_data_option.is_none() {
         return HttpResponse::NotFound().json(CheckQrStatusResponse {
@@ -103,7 +129,6 @@ pub async fn check_qr_status(path: web::Path<String>) -> impl Responder {
 
     let mut stored_data = stored_data_option.unwrap();
 
-    // 如果已经成功，直接返回结果
     if stored_data.status == "success" {
         return HttpResponse::Ok().json(CheckQrStatusResponse {
             status: "success".to_string(),
@@ -112,8 +137,7 @@ pub async fn check_qr_status(path: web::Path<String>) -> impl Responder {
         });
     }
 
-    // 检查是否超时
-    if (chrono::Utc::now() - stored_data.created_at).num_seconds() > 300 { // 5 minutes
+    if (chrono::Utc::now() - stored_data.created_at).num_seconds() > 300 {
         store.remove(&qr_id);
         return HttpResponse::NotFound().json(CheckQrStatusResponse {
             status: "expired".to_string(),
@@ -127,10 +151,9 @@ pub async fn check_qr_status(path: web::Path<String>) -> impl Responder {
     match taptap_service.check_qr_code_result(&stored_data.device_code, &stored_data.device_id).await {
         Ok(result) => {
             if let Some(session_token) = result.get("sessionToken").and_then(|v| v.as_str()) {
-                // 绑定成功
                 stored_data.status = "success".to_string();
                 stored_data.session_token = Some(session_token.to_string());
-                store.insert(qr_id.clone(), stored_data); // Re-insert updated data
+                store.insert(qr_id.clone(), stored_data);
                 HttpResponse::Ok().json(CheckQrStatusResponse {
                     status: "success".to_string(),
                     session_token: Some(session_token.to_string()),
@@ -138,7 +161,7 @@ pub async fn check_qr_status(path: web::Path<String>) -> impl Responder {
                 })
             } else if result.get("error").and_then(|v| v.as_str()) == Some("authorization_waiting") {
                 stored_data.status = "scanned".to_string();
-                store.insert(qr_id.clone(), stored_data); // Re-insert updated data
+                store.insert(qr_id.clone(), stored_data);
                 HttpResponse::Ok().json(CheckQrStatusResponse {
                     status: "scanned".to_string(),
                     session_token: None,

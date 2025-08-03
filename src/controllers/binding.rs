@@ -1,35 +1,43 @@
 use actix_web::{post, web, HttpResponse};
 use chrono::Utc;
 use serde_json::json;
+use utoipa;
 
-use crate::models::{ApiResponse, BindRequest, IdentifierRequest, PlatformBinding, /* TokenListResponse, */ UnbindInitiateResponse};
+use crate::models::user::{ApiResponse, BindRequest, IdentifierRequest, PlatformBinding, TokenListResponse, UnbindInitiateResponse};
 use crate::services::phigros::PhigrosService;
 use crate::services::user::UserService;
 use crate::utils::error::{AppError, AppResult};
 use crate::utils::save_parser::check_session_token;
 
+/// 绑定平台账号
+///
+/// 将一个 Phigros 平台账号（由 platform 和 platform_id 标识）与一个 Session Token 绑定。
+/// 如果 Token 已被其他账号绑定，则将此平台账号加入该 Token 的绑定列表。
+/// 如果平台账号已被其他 Token 绑定，则会进行更新。
+#[utoipa::path(
+    post,
+    path = "/bind",
+    request_body = BindRequest,
+    responses(
+        (status = 200, description = "绑定成功或已更新", body = ApiResponse<serde_json::Value>)
+    )
+)]
 #[post("/bind")]
 pub async fn bind_user(
     bind_req: web::Json<BindRequest>,
     user_service: web::Data<UserService>,
 ) -> AppResult<HttpResponse> {
-    // 检查会话令牌格式
     check_session_token(&bind_req.token)?;
     
-    // 标准化平台名称为小写，以确保大小写不敏感
     let platform = bind_req.platform.to_lowercase();
     let platform_id = bind_req.platform_id.clone();
     
-    // 创建变量存储绑定结果的内部ID
     let internal_id: String;
     
-    // 检查平台ID是否已绑定到其他Token
     if user_service.is_platform_id_bound(&platform, &platform_id).await? {
-        // 获取当前绑定信息
         let existing_binding = user_service.get_binding_by_platform_id(&platform, &platform_id).await?;
         internal_id = existing_binding.internal_id.clone();
         
-        // 如果提供了不同的Token，更新绑定
         if existing_binding.session_token != bind_req.token {
             user_service.update_platform_binding_token(&platform, &platform_id, &bind_req.token).await?;
             
@@ -37,27 +45,20 @@ pub async fn bind_user(
                 code: 200,
                 status: "success".to_string(),
                 message: Some(format!("已更新平台 {} 的 ID {} 的Token", platform, platform_id)),
-                data: Some(json!({
-                    "internal_id": internal_id
-                })),
+                data: Some(json!({ "internal_id": internal_id })),
             }));
         } else {
             return Ok(HttpResponse::Ok().json(ApiResponse {
                 code: 200,
                 status: "success".to_string(),
                 message: Some(format!("平台 {} 的 ID {} 已绑定到同一Token", platform, platform_id)),
-                data: Some(json!({
-                    "internal_id": internal_id
-                })),
+                data: Some(json!({ "internal_id": internal_id })),
             }));
         }
     }
     
-    // 检查token是否已绑定
     match user_service.get_binding_by_token(&bind_req.token).await {
-        // 如果token已绑定到其他平台账号
         Ok(existing_binding) => {
-            // 将当前平台ID也绑定到相同的内部ID
             internal_id = existing_binding.internal_id.clone();
             let binding = PlatformBinding::new(
                 internal_id.clone(),
@@ -71,14 +72,10 @@ pub async fn bind_user(
                 code: 200,
                 status: "success".to_string(),
                 message: Some(format!("平台 {} 的 ID {} 已绑定到现有内部用户", platform, platform_id)),
-                data: Some(json!({
-                    "internal_id": internal_id
-                })),
+                data: Some(json!({ "internal_id": internal_id })),
             }))
         },
-        // 如果token未绑定
         Err(AppError::UserBindingNotFound(_)) => {
-            // 创建新的内部用户
             internal_id = user_service.get_or_create_internal_id_by_token(
                 &bind_req.token, 
                 &platform, 
@@ -89,15 +86,24 @@ pub async fn bind_user(
                 code: 200,
                 status: "success".to_string(),
                 message: Some(format!("平台 {} 的 ID {} 已成功绑定", platform, platform_id)),
-                data: Some(json!({
-                    "internal_id": internal_id
-                })),
+                data: Some(json!({ "internal_id": internal_id })),
             }))
         },
         Err(e) => Err(e)
     }
 }
 
+/// 列出所有绑定的Token
+///
+/// 根据提供的任一标识（Token 或 平台+平台ID），找出其所属的内部用户，并列出该内部用户绑定的所有平台账号信息。
+#[utoipa::path(
+    post,
+    path = "/token/list",
+    request_body = IdentifierRequest,
+    responses(
+        (status = 200, description = "成功获取Token列表", body = ApiResponse<TokenListResponse>)
+    )
+)]
 #[post("/token/list")]
 pub async fn list_tokens(
     req: web::Json<IdentifierRequest>,
@@ -107,12 +113,10 @@ pub async fn list_tokens(
     
     let internal_id = match (&req.token, &platform, &req.platform_id) {
         (Some(token), _, _) => {
-            // 通过token获取内部ID
             let binding = user_service.get_binding_by_token(token).await?;
             binding.internal_id
         },
         (_, Some(platform), Some(platform_id)) => {
-            // 通过平台和平台ID获取内部ID
             let binding = user_service.get_binding_by_platform_id(platform, platform_id).await?;
             binding.internal_id
         },
@@ -121,7 +125,6 @@ pub async fn list_tokens(
         }
     };
     
-    // 获取内部ID的所有绑定信息
     let token_list = user_service.get_token_list(&internal_id).await?;
     
     Ok(HttpResponse::Ok().json(ApiResponse {
@@ -132,13 +135,29 @@ pub async fn list_tokens(
     }))
 }
 
+/// 解绑平台账号
+///
+/// 提供两种解绑模式:
+/// 1.  **Token验证**: 提供 `platform`, `platform_id` 和 `token`。如果三者匹配，则直接解绑。
+/// 2.  **简介验证**:
+///     - **步骤1**: 只提供 `platform` 和 `platform_id`，会返回一个验证码。
+///     - **步骤2**: 将游戏内简介修改为该验证码，然后再次调用此接口，并附带 `verification_code` 参数进行确认解绑。
+#[utoipa::path(
+    post,
+    path = "/unbind",
+    request_body = IdentifierRequest,
+    responses(
+        (status = 200, description = "操作成功（解绑或发起验证）", body = ApiResponse<serde_json::Value>),
+        (status = 400, description = "请求参数错误"),
+        (status = 401, description = "验证失败")
+    )
+)]
 #[post("/unbind")]
 pub async fn unbind_user(
     req: web::Json<IdentifierRequest>,
     user_service: web::Data<UserService>,
     phigros_service: web::Data<PhigrosService>,
 ) -> AppResult<HttpResponse> {
-    // 需要同时提供平台和平台ID
     let platform = req.platform.as_ref().map(|p| p.to_lowercase());
     let (platform, platform_id) = match (&platform, &req.platform_id) {
         (Some(p), Some(id)) => (p.clone(), id.clone()),
@@ -146,39 +165,31 @@ pub async fn unbind_user(
     };
     
     match (&req.token, &req.verification_code) {
-        // --- Mode 1: Platform + ID + Token provided --- 
         (Some(token), None) => {
             log::info!("尝试通过平台 '{}' 的 ID '{}' 和 Token 解绑", platform, platform_id);
             check_session_token(token)?;
             
-            // 验证token是否与平台ID绑定匹配
             let binding = user_service.get_binding_by_platform_id(&platform, &platform_id).await?;
             if binding.session_token != *token {
                 return Err(AppError::BadRequest("平台ID与SessionToken不匹配".to_string()));
             }
             
-            // 解绑并返回关联的内部ID
             let internal_id = user_service.delete_platform_binding(&platform, &platform_id).await?;
             
             Ok(HttpResponse::Ok().json(ApiResponse {
                 code: 200,
                 status: "success".to_string(),
                 message: Some("解绑成功 (平台ID+Token验证)".to_string()),
-                data: Some(json!({
-                    "internal_id": internal_id
-                })),
+                data: Some(json!({ "internal_id": internal_id })),
             }))
         },
         
-        // --- Mode 2, Step 1: Platform + ID provided, initiate profile verification --- 
         (None, None) => {
             log::info!("尝试通过平台 '{}' 的 ID '{}' 发起简介验证解绑", platform, platform_id);
             
-            // 检查平台ID是否已绑定
             let binding = user_service.get_binding_by_platform_id(&platform, &platform_id).await?;
             let internal_id = binding.internal_id.clone();
             
-            // 生成验证码
             let code_details = user_service.generate_and_store_verification_code(&platform, &platform_id).await?;
             let expires_in = (code_details.expires_at - Utc::now()).num_seconds();
             let response = UnbindInitiateResponse {
@@ -198,23 +209,18 @@ pub async fn unbind_user(
             }))
         },
         
-        // --- Mode 2, Step 2: Platform + ID + Verification Code provided --- 
         (None, Some(code)) => {
             log::info!("尝试通过平台 '{}' 的 ID '{}' 和验证码 '{}' 确认解绑", platform, platform_id, code);
             
-            // 1. 获取绑定的内部ID (在验证前先获取，以便解绑后返回)
             let binding = user_service.get_binding_by_platform_id(&platform, &platform_id).await?;
             let internal_id = binding.internal_id.clone();
             let stored_token = binding.session_token.clone();
             
-            // 2. 验证并消费验证码
             user_service.validate_and_consume_verification_code(&platform, &platform_id, code).await?;
             
-            // 3. 用存储的token获取存档进行简介核对
             log::debug!("使用存储的 Token 获取平台 '{}' 的 ID '{}' 的存档进行简介核对", platform, platform_id);
             match phigros_service.get_save(&stored_token).await {
                 Ok(save) => {
-                    // 4. 验证简介内容是否与验证码匹配
                     let user_intro: Option<String> = save.user
                         .as_ref()
                         .and_then(|user_map| user_map.get("selfIntro"))
@@ -225,16 +231,13 @@ pub async fn unbind_user(
                          if intro.trim() == code.trim() {
                             log::info!("简介内容与验证码匹配成功 for 平台 '{}' 的 ID '{}'", platform, platform_id);
                             
-                            // 5. 解绑
                             user_service.delete_platform_binding(&platform, &platform_id).await?;
                             
                              Ok(HttpResponse::Ok().json(ApiResponse {
                                  code: 200,
                                  status: "success".to_string(),
                                  message: Some("解绑成功 (简介验证)".to_string()),
-                                data: Some(json!({
-                                    "internal_id": internal_id
-                                })),
+                                data: Some(json!({ "internal_id": internal_id })),
                              }))
                          } else {
                             log::warn!("简介验证失败 for 平台 '{}' 的 ID '{}'. Expected code '{}', got intro '{}'", 
@@ -261,11 +264,10 @@ pub async fn unbind_user(
             }
         },
         
-        // --- Invalid Combinations --- 
         _ => {
             log::warn!("无效的解绑请求参数组合: platform={:?}, platform_id={:?}, token={:?}, code={:?}", 
-                platform, platform_id, req.token, req.verification_code);
+                platform, req.platform_id, req.token, req.verification_code);
             Err(AppError::BadRequest("无效的请求参数组合。请提供: (平台+平台ID+Token) 或 (平台+平台ID发起验证) 或 (平台+平台ID+验证码确认)".to_string()))
         }
     }
-} 
+}

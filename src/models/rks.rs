@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use utoipa::ToSchema;
 
-use super::SongRecord;
+use crate::models::save::SongRecord;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RksRecord {
     pub song_id: String,
     pub song_name: String,
@@ -61,7 +62,7 @@ impl Ord for RksRecord {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RksResult {
     pub records: Vec<RksRecord>,
 }
@@ -75,4 +76,4 @@ impl RksResult {
             records: all_records,
         }
     }
-} 
+}

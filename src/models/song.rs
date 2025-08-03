@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SongInfo {
     pub id: String,
     pub song: String,
@@ -17,7 +18,7 @@ pub struct SongInfo {
     pub at_charter: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SongDifficulty {
     pub id: String,
     #[serde(rename = "EZ")]
@@ -30,13 +31,13 @@ pub struct SongDifficulty {
     pub at: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SongNickname {
     pub id: String,
     pub nicknames: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SongQuery {
     pub song_id: Option<String>,
     pub song_name: Option<String>,
@@ -44,4 +45,4 @@ pub struct SongQuery {
     pub difficulty: Option<String>,
 }
 
-pub type NicknameMap = HashMap<String, Vec<String>>; 
+pub type NicknameMap = HashMap<String, Vec<String>>;

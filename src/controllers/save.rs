@@ -1,38 +1,44 @@
 use actix_web::{post, web, HttpResponse};
+use log::debug;
+use utoipa;
 
-use crate::models::{ApiResponse, IdentifierRequest};
+use crate::models::{user::{ApiResponse, IdentifierRequest}, save::GameSave};
 use crate::services::phigros::PhigrosService;
 use crate::services::user::UserService;
-use crate::services::song::SongService;
 use crate::utils::error::AppResult;
 use crate::utils::save_parser::check_session_token;
 use crate::utils::token_helper::resolve_token;
-use serde_json::json; // 引入json宏
-use tokio; // 引入 tokio
+use serde_json::json;
+use tokio;
 
+/// 获取云存档（不含难度）
+///
+/// 获取玩家的原始云存档，并附加玩家昵称。
+/// 返回的 `game_record` 被简化，只包含 `score`, `acc`, `fc`。
+#[utoipa::path(
+    post,
+    path = "/get/cloud/saves",
+    request_body = IdentifierRequest,
+    responses(
+        (status = 200, description = "成功获取云存档", body = ApiResponse<serde_json::Value>)
+    )
+)]
 #[post("/get/cloud/saves")]
 pub async fn get_cloud_saves(
     req: web::Json<IdentifierRequest>,
     phigros_service: web::Data<PhigrosService>,
     user_service: web::Data<UserService>,
 ) -> AppResult<HttpResponse> {
-    // 解析并获取有效的 SessionToken
     let token = resolve_token(&req, &user_service).await?;
-    
-    // 检查会话令牌
     check_session_token(&token)?;
     
-    // 并行获取存档和 Profile
     let (save_result, profile_result) = tokio::join!(
         phigros_service.get_save(&token),
         phigros_service.get_profile(&token)
     );
 
-    // 处理存档结果 (必须成功)
-    let save_result = save_result?;
-    let _save = save_result; // Prefix unused variable 'save'
+    let save_data = save_result?;
 
-    // 处理 Profile 结果 (获取失败则昵称为 None)
     let player_nickname = match profile_result {
         Ok(profile) => Some(profile.nickname),
         Err(e) => {
@@ -41,9 +47,8 @@ pub async fn get_cloud_saves(
         }
     };
     
-    // --- 构建包含 score, acc, fc 的 game_record --- 
     let mut simplified_game_record = serde_json::Map::new();
-    if let Some(game_record_map) = &_save.game_record {
+    if let Some(game_record_map) = &save_data.game_record {
         for (song_id, difficulties) in game_record_map {
             let mut simplified_difficulties = serde_json::Map::new();
             for (diff_name, record) in difficulties {
@@ -51,23 +56,20 @@ pub async fn get_cloud_saves(
                     "score": record.score,
                     "acc": record.acc,
                     "fc": record.fc
-                    // 不包含 difficulty 和 rks
                 }));
             }
             simplified_game_record.insert(song_id.clone(), serde_json::Value::Object(simplified_difficulties));
         }
     }
     
-    // 使用 _save 变量构建响应
     let mut response_data = json!({
-        "game_key": _save.game_key,
-        "game_progress": _save.game_progress,
+        "game_key": save_data.game_key,
+        "game_progress": save_data.game_progress,
         "game_record": if simplified_game_record.is_empty() { None } else { Some(serde_json::Value::Object(simplified_game_record)) },
-        "settings": _save.settings,
-        "user": _save.user
+        "settings": save_data.settings,
+        "user": save_data.user
     });
 
-    // 如果获取到昵称，添加到响应中
     if let Some(nickname) = player_nickname {
         if let Some(obj) = response_data.as_object_mut() {
             obj.insert("nickname".to_string(), json!(nickname));
@@ -78,26 +80,37 @@ pub async fn get_cloud_saves(
         code: 200,
         status: "ok".to_string(),
         message: None,
-        data: Some(response_data), // 返回包含昵称（如果成功获取）的 JSON 数据
+        data: Some(response_data),
     }))
 }
 
+/// 获取带难度定数的云存档
+///
+/// 获取玩家的完整云存档，其中包含了每首歌每个难度的定数信息。
+#[utoipa::path(
+    post,
+    path = "/get/cloud/saves/with_difficulty",
+    request_body = IdentifierRequest,
+    responses(
+        (status = 200, description = "成功获取带难度定数的云存档", body = ApiResponse<GameSave>)
+    )
+)]
 #[post("/get/cloud/saves/with_difficulty")]
 pub async fn get_cloud_saves_with_difficulty(
     req: web::Json<IdentifierRequest>,
     phigros_service: web::Data<PhigrosService>,
     user_service: web::Data<UserService>,
-    _song_service: web::Data<SongService>, // Mark as unused if needed
 ) -> AppResult<HttpResponse> {
+    debug!("接收到获取带难度定数的云存档请求");
+    
     let token = resolve_token(&req, &user_service).await?;
-    // Call get_save_with_difficulty with only the token
-    let save_result = phigros_service.get_save_with_difficulty(&token).await;
-    let _save = save_result?; // Prefix unused variable
-    // The actual save data is now inside _save, need to return it
+    
+    let save = phigros_service.get_save_with_difficulty(&token).await?;
+    
     Ok(HttpResponse::Ok().json(ApiResponse {
         code: 200,
-        status: "success".to_string(),
-        message: Some("成功获取并解析带定数的云存档".to_string()),
-        data: Some(_save), // Return the save data
+        status: "OK".to_string(),
+        message: None,
+        data: Some(save),
     }))
 }
