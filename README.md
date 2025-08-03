@@ -189,7 +189,7 @@
               "message": "请在 xxx 秒内将您的 Phigros 简介修改为此验证码...",
               "data": {
                   "verification_code": "ABCDEF12",
-                  "expires_in_seconds": 300
+                  "expires_in_seconds": "xxx"
               }
           }
           ```
