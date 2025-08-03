@@ -3,7 +3,7 @@ use chrono::Utc;
 use serde_json::json;
 use utoipa;
 
-use crate::models::user::{ApiResponse, BindRequest, IdentifierRequest, PlatformBinding, TokenListResponse, UnbindInitiateResponse};
+use crate::models::user::{ApiResponse, BindRequest, IdentifierRequest, PlatformBinding, UnbindInitiateResponse};
 use crate::services::phigros::PhigrosService;
 use crate::services::user::UserService;
 use crate::utils::error::{AppError, AppResult};

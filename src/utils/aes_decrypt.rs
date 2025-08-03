@@ -21,6 +21,7 @@ use crate::utils::error::{AppError, AppResult};
 /// 
 /// # Returns
 /// * `AppResult<String>` - 解密后的JSON字符串
+#[allow(dead_code)]
 pub fn decrypt_save_data(data: &[u8]) -> AppResult<String> {
     let key_bytes = config::get_config()?.get_aes_key_bytes()?;
     
@@ -78,6 +79,7 @@ pub fn decrypt_save_data(data: &[u8]) -> AppResult<String> {
 /// 
 /// # Returns
 /// * `AppResult<Value>` - 解析后的JSON值
+#[allow(dead_code)]
 pub fn parse_json(json_str: &str) -> AppResult<Value> {
     serde_json::from_str(json_str).map_err(|e| {
         AppError::SaveDecryptError(format!("JSON解析失败: {}", e))
@@ -91,6 +93,7 @@ pub fn parse_json(json_str: &str) -> AppResult<Value> {
 /// 
 /// # Returns
 /// * `AppResult<Value>` - 解析后的JSON值
+#[allow(dead_code)]
 pub fn decrypt_and_parse(data: &[u8]) -> AppResult<Value> {
     let json_str = decrypt_save_data(data)?;
     parse_json(&json_str)
@@ -99,6 +102,7 @@ pub fn decrypt_and_parse(data: &[u8]) -> AppResult<Value> {
 /// 解密存档数据
 /// 
 /// 输入加密的游戏存档数据，返回解密后的JSON字符串
+#[allow(dead_code)]
 pub fn decrypt_save_data_base64(encrypted_data: &str) -> AppResult<String> {
     // 解码base64
     let data = general_purpose::STANDARD.decode(encrypted_data)
@@ -142,6 +146,7 @@ pub fn decrypt_save_data_base64(encrypted_data: &str) -> AppResult<String> {
 /// 解密并解析存档数据
 /// 
 /// 组合解密和解析步骤
+#[allow(dead_code)]
 pub fn decrypt_and_parse_base64(encrypted_data: &str) -> AppResult<Value> {
     let json_str = decrypt_save_data_base64(encrypted_data)?;
     parse_json(&json_str)

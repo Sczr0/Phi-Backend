@@ -79,6 +79,7 @@ pub struct UnbindInitiateResponse {
 }
 
 #[derive(Debug, Clone, FromRow)]
+#[allow(dead_code)]
 pub struct UnbindVerificationCode {
     pub platform: String,
     pub platform_id: String,

@@ -28,6 +28,7 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
+    #[allow(dead_code)]
     pub fn from_file<P: AsRef<Path>>(path: P) -> AppResult<Self> {
         let mut file = File::open(path).map_err(|e| {
             AppError::ConfigError(format!("无法打开配置文件: {}", e))
@@ -43,6 +44,7 @@ impl AppConfig {
         })
     }
     
+    #[allow(dead_code)]
     pub fn get_aes_key_bytes(&self) -> AppResult<Vec<u8>> {
         let key_bytes = hex::decode(&self.aes_key).map_err(|e| {
             AppError::ConfigError(format!("解析AES密钥失败: {}", e))
@@ -59,8 +61,10 @@ impl AppConfig {
 }
 
 // 全局配置实例
+#[allow(dead_code)]
 static mut CONFIG: Option<AppConfig> = None;
 
+#[allow(dead_code)]
 pub fn init_config<P: AsRef<Path>>(path: Option<P>) -> AppResult<()> {
     let config = match path {
         Some(p) => AppConfig::from_file(p)?,
@@ -74,6 +78,8 @@ pub fn init_config<P: AsRef<Path>>(path: Option<P>) -> AppResult<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
+#[allow(static_mut_refs)]
 pub fn get_config() -> AppResult<AppConfig> {
     unsafe {
         CONFIG.clone().ok_or_else(|| AppError::ConfigError("配置未初始化".to_string()))

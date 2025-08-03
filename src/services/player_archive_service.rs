@@ -535,6 +535,7 @@ ORDER BY rs.play_time DESC;
     
 // 用于合并查询结果的数据库模型
 #[derive(sqlx::FromRow, Clone)]
+#[allow(dead_code)]
 struct CombinedScoreRecord {
     // 玩家信息
     player_id: String,

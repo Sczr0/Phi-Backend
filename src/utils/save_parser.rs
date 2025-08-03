@@ -530,6 +530,7 @@ pub fn parse_save_with_difficulty(save_data: &[u8]) -> AppResult<GameSave> {
     Ok(save)
 }
 
+#[allow(dead_code)]
 pub fn calculate_rks(save: &GameSave) -> AppResult<RksResult> {
     let game_record = save.game_record.as_ref()
         .ok_or_else(|| AppError::Other("没有游戏记录数据".to_string()))?;
@@ -559,6 +560,7 @@ pub fn calculate_rks(save: &GameSave) -> AppResult<RksResult> {
     Ok(RksResult::new(rks_records))
 }
 
+#[allow(dead_code)]
 pub fn get_summary_from_base64(summary_base64: &str) -> AppResult<SaveSummary> {
     let _summary_data = general_purpose::STANDARD.decode(summary_base64)?;
     

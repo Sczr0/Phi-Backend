@@ -13,6 +13,7 @@ use crate::utils::token_helper::resolve_token;
 use crate::utils::data_loader::get_predicted_constant;
 
 #[derive(Deserialize, Debug, IntoParams)]
+#[allow(dead_code)]
 struct SongSearchQuery {
     /// 歌曲的名称、ID或别名
     q: String,

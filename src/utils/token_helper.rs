@@ -45,6 +45,7 @@ pub async fn resolve_token(
 
 /// 从请求中获取内部用户ID
 /// 首先尝试解析token获取平台绑定，然后返回关联的内部ID
+#[allow(dead_code)]
 pub async fn resolve_internal_id(
     req: &web::Json<IdentifierRequest>,
     user_service: &web::Data<UserService>,

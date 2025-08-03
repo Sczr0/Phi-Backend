@@ -48,6 +48,7 @@ pub const AES_KEY_BASE64: &str = "6Jaa0qVAJZuXkZCLiOa/Ax5tIZVu+taKUN1V1nqwkks=";
 pub const AES_IV_BASE64: &str = "Kk/wisgNYwcAV8WVGMgyUw==";
 
 // 存档文件列表
+#[allow(dead_code)]
 pub const SAVE_FILE_LIST: [&str; 5] = [
     "gameKey",
     "gameProgress",

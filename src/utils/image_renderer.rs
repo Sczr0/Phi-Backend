@@ -18,6 +18,7 @@ use rand::thread_rng;
 use crate::models::player_archive::RKSRankingEntry;
 
 
+#[allow(dead_code)]
 pub struct PlayerStats {
     pub ap_top_3_avg: Option<f64>,
     pub best_27_avg: Option<f64>,
@@ -53,6 +54,7 @@ pub struct SongRenderData {
 }
 
 /// 排行榜渲染数据
+#[allow(dead_code)]
 pub struct LeaderboardRenderData {
     pub title: String,
     pub update_time: DateTime<Utc>,
@@ -65,6 +67,7 @@ pub struct LeaderboardRenderData {
 const FONTS_DIR: &str = "resources/fonts";
 const MAIN_FONT_NAME: &str = "思源黑体 CN";
 const COVER_ASPECT_RATIO: f64 = 512.0 / 270.0;
+#[allow(dead_code)]
 const SONG_ILLUST_ASPECT_RATIO: f64 = 1.0; // 假设单曲图的插画是方形的
 
 // Helper function to generate a single score card SVG group
@@ -554,6 +557,7 @@ fn load_custom_fonts(font_db: &mut fontdb::Database) -> Result<(), AppError> {
 
 
 // ... (find_first_font_file function - unchanged, can likely be removed too) ...
+#[allow(dead_code)]
 fn find_first_font_file(dir: &Path) -> Result<Option<PathBuf>, AppError> {
     if !dir.exists() { return Ok(None); }
     let entries = fs::read_dir(dir)

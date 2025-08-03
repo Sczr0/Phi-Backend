@@ -96,6 +96,7 @@ impl TapTapService {
         self.leancloud_service.login_with_taptap(&token, &account.openid, &account.unionid).await
     }
 
+    #[allow(dead_code)]
     pub async fn get_profile(&self, authorization: &str) -> Result<String> {
         let response = self.client.get("https://open.tapapis.cn/account/basic-info/v1?client_id=rAK3FfdieFob2Nn8Am")
             .header("User-Agent", "TapTapAndroidSDK/3.16.5")

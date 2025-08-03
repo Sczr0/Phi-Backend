@@ -2,7 +2,7 @@ use actix_web::{post, web, HttpResponse};
 use log::debug;
 use utoipa;
 
-use crate::models::{user::{ApiResponse, IdentifierRequest}, save::GameSave};
+use crate::models::user::{ApiResponse, IdentifierRequest};
 use crate::services::phigros::PhigrosService;
 use crate::services::user::UserService;
 use crate::utils::error::AppResult;

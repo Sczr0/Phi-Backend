@@ -18,6 +18,7 @@ fn get_aes_key_iv() -> AppResult<(Vec<u8>, Vec<u8>)> {
 }
 
 // AES CBC加密
+#[allow(dead_code)]
 pub fn encrypt(data: &[u8]) -> AppResult<Vec<u8>> {
     let (key, iv) = get_aes_key_iv()?;
     
@@ -80,6 +81,7 @@ pub fn decrypt(data: &[u8]) -> AppResult<Vec<u8>> {
 }
 
 // PKCS#7 填充
+#[allow(dead_code)]
 fn pkcs7_pad(data: &[u8], block_size: usize) -> Vec<u8> {
     let padding_size = block_size - (data.len() % block_size);
     let mut padded_data = data.to_vec();
@@ -88,6 +90,7 @@ fn pkcs7_pad(data: &[u8], block_size: usize) -> Vec<u8> {
 }
 
 // 计算MD5校验和
+#[allow(dead_code)]
 pub fn calculate_md5(data: &[u8]) -> String {
     let mut hasher = Md5::new();
     hasher.update(data);

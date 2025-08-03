@@ -3,6 +3,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum AppError {
     #[error("AES错误: {0}")]
     AesError(String),

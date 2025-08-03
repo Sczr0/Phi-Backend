@@ -1,4 +1,3 @@
-use std::ops::Deref;
 use crate::models::song::{SongInfo, SongDifficulty};
 use crate::utils::data_loader::{SONG_INFO, DIFFICULTY_MAP, SONG_NICKNAMES};
 use crate::utils::error::{AppError, AppResult};
@@ -101,6 +100,7 @@ impl SongService {
     }
 
     // 获取所有歌曲信息
+    #[allow(dead_code)]
     pub fn get_all_songs(&self) -> Vec<SongInfo> {
         SONG_INFO.to_vec()
     }
@@ -115,6 +115,7 @@ impl SongService {
         self.get_song_id(nickname)
     }
 
+    #[allow(dead_code)]
     pub fn get_song_info(&self, id: &str) -> AppResult<SongInfo> {
         self.search_song(id)
     }

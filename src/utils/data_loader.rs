@@ -203,10 +203,12 @@ pub fn get_song_name_by_id(id: &str) -> Option<String> {
     result
 }
 
+#[allow(dead_code)]
 pub fn get_song_id_by_name(name: &str) -> Option<String> {
     SONG_NAME_TO_ID.get(name).cloned()
 }
 
+#[allow(dead_code)]
 pub fn get_song_by_nickname(nickname: &str) -> Option<String> {
     let query_lower = nickname.to_lowercase();
     for (song, nicknames) in SONG_NICKNAMES.iter() {

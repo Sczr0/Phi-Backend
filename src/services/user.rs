@@ -71,6 +71,7 @@ impl UserService {
     }
 
     // 获取内部用户信息
+    #[allow(dead_code)]
     pub async fn get_internal_user(&self, internal_id: &str) -> AppResult<InternalUser> {
         sqlx::query_as::<_, InternalUser>(
             "SELECT * FROM internal_users WHERE internal_id = ?"

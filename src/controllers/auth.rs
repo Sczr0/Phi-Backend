@@ -7,7 +7,7 @@ use base64::{engine::general_purpose, Engine as _};
 use uuid::Uuid;
 use crate::services::taptap::{TapTapService, TapTapQrCodeResponse};
 use lazy_static::lazy_static;
-use utoipa::{ToSchema, path};
+use utoipa::ToSchema;
 
 lazy_static! {
     static ref QR_CODE_STORE: Mutex<HashMap<String, QrCodeState>> = Mutex::new(HashMap::new());
