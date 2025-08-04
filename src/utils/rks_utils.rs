@@ -163,26 +163,24 @@ fn simulate_rks_increase(
         }
     };
 
+    // 判断新记录是否能进入B27
+    let b27_threshold = precalculated.b27_records.last().map_or(0.0, |r| r.rks);
 
-    if simulated_chart_rks > b27_min_rks {
+    if simulated_chart_rks > b27_threshold || removed_from_b27 {
+        // 如果新RKS高于B27门槛，或者被更新的歌曲原本就在B27中
+        
+        // 1. 加上新RKS
         current_b27_sum += simulated_chart_rks;
-        // 如果B27原本已满，需要减去被挤掉的那个（即更新前的第27个，如果旧记录被移除，则是第27个）
-        if precalculated.b27_records.len() >= 27 {
-            if removed_from_b27 {
-                 // 旧记录在B27被移除，新纪录加入，第27个被挤出
-                 if let Some(record_to_remove) = precalculated.b27_records.get(26) { // 原来的第27个
-                     current_b27_sum -= record_to_remove.rks;
-                     log::trace!(" - B27移除记录: {} (RKS {:.4})", record_to_remove.song_id, record_to_remove.rks);
-                 }
-            } else {
-                // 旧记录不在B27，新纪录加入，第27个被挤出
-                 if let Some(record_to_remove) = precalculated.b27_records.last() { // 原来的第27个
-                     current_b27_sum -= record_to_remove.rks;
-                     log::trace!(" - B27移除记录: {} (RKS {:.4})", record_to_remove.song_id, record_to_remove.rks);
-                 }
+        log::trace!(" + 添加到B27 Sum: {} (RKS {:.4})", target_chart_id_full, simulated_chart_rks);
+
+        // 2. 如果是从外部挤入B27，则需要减去被挤掉的成绩
+        if !removed_from_b27 && precalculated.b27_records.len() >= 27 {
+            if let Some(record_to_remove) = precalculated.b27_records.last() {
+                current_b27_sum -= record_to_remove.rks;
+                log::trace!(" - B27中被挤掉的记录: {} (RKS {:.4})", record_to_remove.song_id, record_to_remove.rks);
             }
         }
-        log::trace!(" + 添加到B27: {} (RKS {:.4})", target_chart_id_full, simulated_chart_rks);
+        // 如果removed_from_b27为true, 说明只是更新B27内部的歌曲, 在之前已经减去了旧值, 此处无需操作
     }
 
     // --- 模拟 AP Top 3 更新 ---
