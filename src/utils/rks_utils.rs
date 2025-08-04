@@ -149,7 +149,7 @@ fn simulate_rks_increase(
 
     // 判断新记录是否能进入B27
     // 获取B27的最低RKS（如果B27不满27个，则最低为0）
-    let b27_min_rks = if b27_candidates.len() < 27 && !removed_from_b27 {
+    let _b27_min_rks = if b27_candidates.len() < 27 && !removed_from_b27 {
         0.0 // B27未满且旧记录不在B27中（或者不存在旧记录），新记录肯定能进
     } else if b27_candidates.is_empty() {
         0.0 // B27为空，新记录肯定能进

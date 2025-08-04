@@ -2,10 +2,11 @@ use actix_web::{web, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use qrcode::QrCode;
+use qrcode::{QrCode, render::svg};
 use base64::{engine::general_purpose, Engine as _};
 use uuid::Uuid;
 use crate::services::taptap::{TapTapService, TapTapQrCodeResponse};
+use crate::utils::image_renderer;
 use lazy_static::lazy_static;
 use utoipa::ToSchema;
 
@@ -78,18 +79,32 @@ pub async fn generate_qr_code() -> impl Responder {
                 log::info!("QR code {} expired and removed from store.", qr_id_clone);
             });
 
+                // 1. 创建二维码数据
             let code = QrCode::new(&qr_code_data.qrcode_url).unwrap();
-            let width = code.width();
-            let image_data = code.to_colors();
-            let mut img_buf = image::ImageBuffer::new(width as u32, width as u32);
-            for (x, y, pixel) in img_buf.enumerate_pixels_mut() {
-                let index = y as usize * width + x as usize;
-                *pixel = image::Luma([if image_data[index] == qrcode::Color::Dark { 0 } else { 255 }]);
-            }
-            let mut bytes: Vec<u8> = Vec::new();
-            image::DynamicImage::ImageLuma8(img_buf).write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageOutputFormat::Png).unwrap();
-            let qr_code_image = format!("data:image/png;base64,{}", general_purpose::STANDARD.encode(&bytes));
 
+            // 2. 将二维码渲染成SVG字符串
+            let svg_str = code.render()
+                .min_dimensions(256, 256) // 设置最小尺寸为256x256
+                .dark_color(svg::Color("#000000")) // 黑色模块
+                .light_color(svg::Color("#FFFFFF")) // 白色背景
+                .build();
+
+            // 3. 使用 image_renderer 将SVG转换为PNG字节
+            let png_bytes = match image_renderer::render_svg_to_png(svg_str) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    log::error!("Failed to render QR code SVG to PNG: {:?}", e);
+                    return HttpResponse::InternalServerError().json(serde_json::json!({
+                        "error": "Failed to render QR code",
+                        "details": e.to_string()
+                    }));
+                }
+            };
+
+            // 4. 将PNG字节流编码为Base64字符串
+            let qr_code_image = format!("data:image/png;base64,{}", general_purpose::STANDARD.encode(&png_bytes));
+
+            // 5. 返回响应
             HttpResponse::Ok().json(GenerateQrCodeResponse { qr_id, qr_code_image })
         },
         Err(e) => {

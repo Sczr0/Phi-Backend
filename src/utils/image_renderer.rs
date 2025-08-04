@@ -82,6 +82,7 @@ fn generate_card_svg(
     is_ap_card: bool, // Flag to indicate if this is for the AP section
     is_ap_score: bool, // Flag to indicate if the score itself is AP
     pre_calculated_push_acc: Option<f64>, // 新增：预先计算的推分ACC
+    all_sorted_records: &[RksRecord], // 新增：所有排序好的成绩，用于新版推分计算
 ) -> Result<(), AppError> {
     let fmt_err = |e| AppError::InternalError(format!("SVG formatting error: {}", e));
 
@@ -174,8 +175,14 @@ fn generate_card_svg(
         let push_acc = if let Some(pa) = pre_calculated_push_acc {
             pa
         } else {
-            // 否则使用旧算法计算
-            rks_utils::calculate_min_push_acc(score.rks, score.difficulty_value)
+            // 否则使用新算法计算
+            let target_chart_id = format!("{}-{}", score.song_id, score.difficulty);
+            let all_records_vec = all_sorted_records.to_vec(); // 需要 Vec<RksRecord>
+            rks_utils::calculate_target_chart_push_acc(
+                &target_chart_id,
+                score.difficulty_value,
+                &all_records_vec
+            ).unwrap_or(100.0) // 如果计算失败（比如格式错误），则默认为100
         };
 
         // 如果推分acc非常接近100，直接显示 -> 100.00%
@@ -425,7 +432,7 @@ pub fn generate_svg_string(
                 map.get(&key).copied()
             });
             
-            generate_card_svg(&mut svg, score, idx, x_pos, ap_card_start_y, main_card_width, true, true, push_acc)?;
+            generate_card_svg(&mut svg, score, idx, x_pos, ap_card_start_y, main_card_width, true, true, push_acc, scores)?;
         }
         writeln!(svg, r#"</g>"#).map_err(fmt_err)?;
     }
@@ -450,7 +457,7 @@ pub fn generate_svg_string(
             map.get(&key).copied()
         });
         
-        generate_card_svg(&mut svg, score, index, x, y, main_card_width, false, is_ap_score, push_acc)?;
+        generate_card_svg(&mut svg, score, index, x, y, main_card_width, false, is_ap_score, push_acc, scores)?;
     }
 
 
