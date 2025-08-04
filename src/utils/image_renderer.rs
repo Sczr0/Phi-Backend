@@ -1,5 +1,6 @@
 use crate::models::rks::RksRecord;
 use crate::utils::error::AppError;
+use crate::utils::rks_utils;
 use crate::utils::cover_loader;
 use resvg::usvg::{self, Options as UsvgOptions, fontdb};
 use resvg::{render, tiny_skia::{Pixmap, Transform}};
@@ -174,7 +175,7 @@ fn generate_card_svg(
             pa
         } else {
             // 否则使用旧算法计算
-            calculate_min_push_acc(score.rks, score.difficulty_value)
+            rks_utils::calculate_min_push_acc(score.rks, score.difficulty_value)
         };
 
         // 如果推分acc非常接近100，直接显示 -> 100.00%
@@ -574,45 +575,6 @@ fn find_first_font_file(dir: &Path) -> Result<Option<PathBuf>, AppError> {
     Ok(None)
 }
 
-
-// --- 计算最小推分 ACC (旧版算法) ---
-// 注意：这是旧版的推分ACC计算方法，仅考虑单曲RKS提升0.01，不考虑玩家总RKS
-// 此函数仅供BN图显示使用，新版推分ACC计算请使用image_service.rs中的calculate_target_chart_push_acc函数
-pub fn calculate_min_push_acc(current_rks: f64, difficulty_value: f64) -> f64 {
-    // 无法有效计算的情况
-    if difficulty_value <= 0.0 { return 100.0; } // 定数为0无法计算
-
-    // 计算当前RKS四舍五入到两位小数
-    let current_rks_rounded = (current_rks * 100.0).round() / 100.0;
-    // 计算要达到下一个0.01 RKS所需的精确RKS阈值 (当前舍入值 + 0.005)
-    let target_rks_threshold = current_rks_rounded + 0.005;
-
-    // 如果当前RKS已经达到或超过了下一个阈值，说明无法通过"提升ACC"来达成"+0.01"的目标
-    if current_rks >= target_rks_threshold {
-        return 100.0; // 返回100表示已满或无法提升
-    }
-
-    // Phigros RKS正确计算公式: RKS = ((100×Acc - 55)/45)² × 定数
-    // 反解得到 ACC 小数 = (55 + 45 * sqrt(目标RKS / 定数)) / 100
-
-    // 防止除零或负数开方
-    let rks_ratio = target_rks_threshold / difficulty_value;
-    if rks_ratio < 0.0 {
-        return 100.0; // 不应该发生，但做保护
-    }
-
-    let sqrt_term = rks_ratio.sqrt();
-    let acc_decimal = (55.0 + 45.0 * sqrt_term) / 100.0;
-
-    // 转换为百分数形式并检查合理性
-    let acc_percent = acc_decimal * 100.0;
-
-    // 应用约束 [70.0, 100.0]
-    let constrained_acc = acc_percent.max(70.0).min(100.0);
-
-    // 向上取整到小数点后两位，确保稳定跨过阈值
-    (constrained_acc * 100.0).ceil() / 100.0
-}
 
 // --- 新增：生成单曲成绩 SVG ---
 pub fn generate_song_svg_string(

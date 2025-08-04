@@ -7,6 +7,7 @@ pub mod save_parser;
 pub mod token_helper;
 pub mod image_renderer;
 pub mod cover_loader;
+pub mod rks_utils;
 
 // Remove unused re-exports
 // pub use aes_decrypt::*;

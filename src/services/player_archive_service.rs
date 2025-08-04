@@ -354,7 +354,7 @@ ORDER BY rs.play_time DESC;
     
     /// 计算并更新推分ACC
     pub async fn recalculate_push_acc(&self, player_id: &str) -> Result<(), AppError> {
-        use crate::services::image_service::calculate_target_chart_push_acc;
+        use crate::utils::rks_utils::calculate_target_chart_push_acc;
         log::info!("重新计算玩家[{}]推分ACC", player_id);
         
         // 获取玩家存档

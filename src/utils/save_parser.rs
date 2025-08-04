@@ -501,7 +501,7 @@ pub fn parse_save_with_difficulty(save_data: &[u8]) -> AppResult<GameSave> {
                         if let Some(acc) = record.acc {
                             log::trace!("    有 ACC: {}, 定数: {}, 准备计算 RKS", acc, difficulty);
                             if acc >= 70.0 {
-                                let rks = ((acc - 55.0) / 45.0).powf(2.0) * difficulty;
+                                let rks = crate::utils::rks_utils::calculate_chart_rks(acc, difficulty);
                                 log::trace!("    计算得到 RKS: {}", rks);
                                 record.rks = Some(rks);
                             } else {
@@ -582,7 +582,7 @@ pub fn calculate_b30(save: &GameSave) -> AppResult<B30Result> {
                 .filter_map(|(diff_name, record)| {
                     if let (Some(acc), Some(difficulty)) = (record.acc, record.difficulty) {
                         if acc >= 70.0 && difficulty > 0.0 {
-                            let rks = ((acc - 55.0) / 45.0).powf(2.0) * difficulty;
+                            let rks = crate::utils::rks_utils::calculate_chart_rks(acc, difficulty);
                             let is_ap = record.score.map_or(false, |s| s == 1_000_000.0);
                             Some(B30Record {
                                 song_id: song_id.clone(),

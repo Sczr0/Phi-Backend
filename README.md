@@ -391,6 +391,8 @@ Docker 配置使用卷映射来持久化数据:
 
 ## 致谢
 
-该项目的大部分代码由LLM生成，设计和部分数据处理逻辑参考了 [phi-plugin](https://github.com/Catrong/phi-plugin)
+该项目的大部分代码由LLM生成，
+
+设计和部分数据处理逻辑参考了 [phi-plugin](https://github.com/Catrong/phi-plugin) , 扫码登录参考了[PhiLogin](https://github.com/7aGiven/PhiLogin)
 
 在此一并表示感谢awa

@@ -24,11 +24,7 @@ impl RksRecord {
         record: &SongRecord,
     ) -> Self {
         let acc = record.acc.unwrap_or(0.0);
-        let rks = if acc >= 70.0 {
-            ((acc - 55.0) / 45.0).powf(2.0) * difficulty_value
-        } else {
-            0.0
-        };
+        let rks = crate::utils::rks_utils::calculate_chart_rks(acc, difficulty_value);
 
         Self {
             song_id,
