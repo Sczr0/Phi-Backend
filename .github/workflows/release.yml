@@ -1,0 +1,66 @@
+# GitHub Action: 自动构建和发布
+# 当代码推送到 main 分支时触发此工作流
+name: Build and Release
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-release:
+    # 使用矩阵策略为多个目标平台并行构建
+    strategy:
+      matrix:
+        # 定义不同的目标平台
+        # target: 目标三元组 (target triple)
+        # os: 运行构建任务的虚拟机操作系统
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+
+    # 在指定os的虚拟机上运行
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    # 第一步：检出你的代码仓库
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    # 第二步：安装和配置 Rust 工具链
+    - name: 安装 Rust 工具链
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        # 使用稳定版的 Rust
+        toolchain: stable
+        # 为矩阵中定义的目标平台安装支持
+        targets: ${{ matrix.target }}
+
+    # 第三步：编译项目
+    # 使用 --release 参数进行优化构建
+    # 使用 --target 参数进行交叉编译
+    - name: 编译项目
+      run: cargo build --release --target ${{ matrix.target }}
+
+    # 第四步：上传构建产物
+    # 将编译好的可执行文件作为 artifact 上传，方便下载
+    - name: 上传构建产物 (Windows)
+      if: matrix.os == 'windows-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        # artifact 的名字
+        name: phi-backend-${{ matrix.target }}
+        # 需要上传的文件的路径
+        # 注意：请将 'phi-backend-rust' 替换为你的 Cargo.toml 中定义的实际可执行文件名
+        path: target\\${{ matrix.target }}\\release\\phi-backend-rust.exe
+
+    - name: 上传构建产物 (Linux/macOS)
+      if: matrix.os != 'windows-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: phi-backend-${{ matrix.target }}
+        # 注意：请将 'phi-backend-rust' 替换为你的 Cargo.toml 中定义的实际可执行文件名
+        path: target/${{ matrix.target }}/release/phi-backend-rust
