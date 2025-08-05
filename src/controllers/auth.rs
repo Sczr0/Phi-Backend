@@ -131,29 +131,47 @@ pub async fn generate_qr_code() -> impl Responder {
 )]
 pub async fn check_qr_status(path: web::Path<String>) -> impl Responder {
     let qr_id = path.into_inner();
-    let mut store = QR_CODE_STORE.lock().unwrap();
-    let stored_data_option = store.get(&qr_id).cloned();
+    
+    // --- 第1步：缩小锁的作用域，只用于读取 ---
+    // 我们只在这里读取一次，然后立即释放锁
+    let stored_data = { // 使用花括号创建一个新的作用域
+        let store = QR_CODE_STORE.lock().unwrap();
+        store.get(&qr_id).cloned() // 克隆数据，这样我们就可以在锁外使用它
+    }; // store 在这里被 drop，锁被释放
 
-    if stored_data_option.is_none() {
-        return HttpResponse::NotFound().json(CheckQrStatusResponse {
-            status: "expired".to_string(),
-            session_token: None,
-            message: Some("QR Code not found or expired.".to_string()),
-        });
-    }
+    // 如果二维码不存在，直接返回过期
+    let mut stored_data = match stored_data {
+        Some(data) => data,
+        None => {
+            return HttpResponse::NotFound().json(CheckQrStatusResponse {
+                status: "expired".to_string(),
+                session_token: None,
+                message: Some("QR Code not found or has already been used.".to_string()),
+            });
+        }
+    };
 
-    let mut stored_data = stored_data_option.unwrap();
-
+    // --- 第2步：处理已成功的状态 ---
+    // 如果状态已经是 "success"，我们返回成功信息，并从存储中删除它
     if stored_data.status == "success" {
+        // 再次获取锁以执行删除操作
+        let mut store = QR_CODE_STORE.lock().unwrap();
+        store.remove(&qr_id); // 清理已成功的条目
+        
         return HttpResponse::Ok().json(CheckQrStatusResponse {
             status: "success".to_string(),
-            session_token: stored_data.session_token.clone(),
+            session_token: stored_data.session_token,
             message: None,
         });
     }
-
+    
+    // --- 第3步：处理过期 ---
+    // 检查时间是否已超过5分钟 (300秒)
     if (chrono::Utc::now() - stored_data.created_at).num_seconds() > 300 {
-        store.remove(&qr_id);
+        // 获取锁以执行删除操作
+        let mut store = QR_CODE_STORE.lock().unwrap();
+        store.remove(&qr_id); // 清理过期的条目
+        
         return HttpResponse::NotFound().json(CheckQrStatusResponse {
             status: "expired".to_string(),
             session_token: None,
@@ -161,35 +179,42 @@ pub async fn check_qr_status(path: web::Path<String>) -> impl Responder {
         });
     }
 
+    // --- 第4步：执行网络请求 (现在我们没有持有任何锁) ---
     let taptap_service = TapTapService::new();
+    let check_result = taptap_service.check_qr_code_result(&stored_data.device_code, &stored_data.device_id).await;
 
-    match taptap_service.check_qr_code_result(&stored_data.device_code, &stored_data.device_id).await {
+    // --- 第5步：根据网络请求结果，再次获取锁来更新状态 ---
+    match check_result {
         Ok(result) => {
+            // 再次获取锁来更新或删除 HashMap 中的数据
+            let mut store = QR_CODE_STORE.lock().unwrap();
+
             if let Some(session_token) = result.get("sessionToken").and_then(|v| v.as_str()) {
-                stored_data.status = "success".to_string();
-                stored_data.session_token = Some(session_token.to_string());
-                store.insert(qr_id.clone(), stored_data);
+                // 登录成功！返回token并立即从store中删除
+                store.remove(&qr_id);
                 HttpResponse::Ok().json(CheckQrStatusResponse {
                     status: "success".to_string(),
                     session_token: Some(session_token.to_string()),
                     message: None,
                 })
             } else if result.get("error").and_then(|v| v.as_str()) == Some("authorization_waiting") {
+                // 用户已扫码，更新状态
                 stored_data.status = "scanned".to_string();
-                store.insert(qr_id.clone(), stored_data);
+                store.insert(qr_id, stored_data);
                 HttpResponse::Ok().json(CheckQrStatusResponse {
                     status: "scanned".to_string(),
                     session_token: None,
                     message: None,
                 })
             } else if result.get("error").and_then(|v| v.as_str()) == Some("authorization_pending") {
+                // 状态未变，什么都不做，只返回响应
                 HttpResponse::Ok().json(CheckQrStatusResponse {
                     status: "pending".to_string(),
                     session_token: None,
                     message: None,
                 })
             } else {
-                log::error!("Unknown error from TapTap during QR check: {:?}", result);
+                // 其他错误情况
                 let error_description = result.get("error_description").and_then(|v| v.as_str()).unwrap_or("Unknown error");
                 HttpResponse::BadRequest().json(CheckQrStatusResponse {
                     status: "error".to_string(),
