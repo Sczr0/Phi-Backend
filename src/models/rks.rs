@@ -13,6 +13,7 @@ pub struct RksRecord {
     pub acc: f64,
     pub score: Option<f64>,
     pub rks: f64,
+    pub is_fc: bool,
 }
 
 impl RksRecord {
@@ -25,6 +26,7 @@ impl RksRecord {
     ) -> Self {
         let acc = record.acc.unwrap_or(0.0);
         let rks = crate::utils::rks_utils::calculate_chart_rks(acc, difficulty_value);
+        let is_fc = record.fc.unwrap_or(false);
 
         Self {
             song_id,
@@ -34,6 +36,7 @@ impl RksRecord {
             acc,
             score: record.score,
             rks,
+            is_fc,
         }
     }
 }

@@ -109,7 +109,13 @@ fn generate_card_svg(
     let cover_x = card_padding;
     let cover_y = card_padding;
 
-    let card_class = if is_ap_score { "card card-ap" } else { "card" };
+    let card_class = if is_ap_score {
+        "card card-ap"
+    } else if score.is_fc {
+        "card card-fc"
+    } else {
+        "card"
+    };
 
     writeln!(svg, r#"<g transform="translate({}, {})">"#, card_x, card_y).map_err(fmt_err)?;
 
@@ -353,6 +359,10 @@ pub fn generate_svg_string(
           stroke: url(#ap-gradient);
           stroke-width: 2;
         }}
+        .card-fc {{
+          stroke: #87CEEB; /* Light Sky Blue */
+          stroke-width: 2;
+        }}
         /* ... (其他样式保持不变) ... */
         .text-title {{ font-size: 34px; fill: white; /* font-weight: bold; */ text-shadow: 0px 2px 4px rgba(0, 0, 0, 0.4); }}
         .text-stat {{ font-size: 21px; fill: #E0E0E0; }}
@@ -440,16 +450,12 @@ pub fn generate_svg_string(
 
     // --- Main Score Cards Section --- (保持不变) ...
     let main_content_start_y = header_height + ap_section_height + 15;
-    let ap_score_ids: HashSet<(String, String)> = stats.ap_top_3_scores
-        .iter()
-        .map(|s| (s.song_id.clone(), s.difficulty.clone()))
-        .collect();
     for (index, score) in scores.iter().enumerate() {
         let row = index as u32 / columns;
         let col = index as u32 % columns;
         let x = main_card_padding_outer + col * (main_card_width + main_card_padding_outer);
         let y = main_content_start_y + main_card_padding_outer + row * (calculated_card_height + main_card_padding_outer);
-        let is_ap_score = ap_score_ids.contains(&(score.song_id.clone(), score.difficulty.clone()));
+        let is_ap_score = score.acc >= 100.0;
         
         // 获取预计算的推分ACC（如果有）
         let push_acc = push_acc_map.and_then(|map| {

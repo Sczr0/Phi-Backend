@@ -201,7 +201,7 @@ fn simulate_rks_increase(
              difficulty: difficulty.to_string(),
              rks: simulated_chart_rks,
              // 其他字段不重要
-             song_name: "".to_string(), difficulty_value: 0.0, score: None, acc: 100.0,
+             song_name: "".to_string(), difficulty_value: 0.0, score: None, acc: 100.0, is_fc: false,
         };
         ap_candidates.push(new_ap_record);
         ap_candidates.sort_by(|a, b| b.rks.partial_cmp(&a.rks).unwrap_or(Ordering::Equal)); // 按RKS重新排序AP记录

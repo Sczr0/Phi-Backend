@@ -382,6 +382,7 @@ ORDER BY rs.play_time DESC;
                 acc: s.acc,
                 score: Some(s.score),
                 rks: s.rks,
+                is_fc: s.is_fc,
             }
         }).collect();
         
