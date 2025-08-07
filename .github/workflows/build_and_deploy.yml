@@ -1,0 +1,70 @@
+name: Build, Release and Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-release:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      EXECUTABLE_NAME: phi-backend-rust
+      
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+    - name: 恢复Cargo缓存
+      uses: Swatinem/rust-cache@v2
+    - name: 安装 Rust 工具链
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+        targets: ${{ matrix.target }}
+    - name: 编译项目
+      run: cargo build --release --target ${{ matrix.target }}
+    - name: 上传构建产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: phi-backend-${{ matrix.target }}
+        path: |
+          target/${{ matrix.target }}/release/${{ env.EXECUTABLE_NAME }}
+          target/${{ matrix.target }}/release/${{ env.EXECUTABLE_NAME }}.exe
+
+  deploy-to-linux-server:
+    needs: build-release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 下载 Linux 构建产物
+      uses: actions/download-artifact@v4
+      with:
+        name: phi-backend-x86_64-unknown-linux-gnu
+
+    - name: 安装 SSH Key
+      uses: shimataro/ssh-key-action@v2
+      with:
+        key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+        known_hosts: 'just-a-placeholder'
+
+    - name: 添加服务器到 known_hosts
+      run: ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+    - name: 部署到服务器
+      env:
+        DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        EXECUTABLE_NAME: phi-backend-rust
+      run: |
+        mv ${{ env.EXECUTABLE_NAME }} new_release_binary
+        scp ./new_release_binary ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}:~/new_release_binary
+        ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "bash /home/ecs-user/deploy_backend.sh ~/new_release_binary"
