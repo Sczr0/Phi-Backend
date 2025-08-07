@@ -17,7 +17,8 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         // Saves
         .service(controllers::save::get_cloud_saves) // POST /get/cloud/saves
         .service(controllers::save::get_cloud_saves_with_difficulty) // POST /get/cloud/saves/with_difficulty
-        // RKS / BN
+        .service(controllers::save::get_cloud_save_info)    // GET /get/cloud/saveInfo
+       // RKS / BN
         .service(controllers::rks::get_rks)      // POST /rks
         .service(controllers::b30::get_b30)      // POST /b30
         .service(controllers::rks::get_bn)       // POST /bn/{n}

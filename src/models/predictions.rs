@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 pub struct PredictedConstants {
     pub ez: Option<f32>,
     pub hd: Option<f32>,
-    pub inl: Option<f32>, // 注意这里代码中使用的是 inl 而不是 in
+    pub inl: Option<f32>,
     pub at: Option<f32>,
 }
 

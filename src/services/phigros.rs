@@ -224,4 +224,11 @@ impl PhigrosService {
             }
         }
     }
+// 新增函数：直接获取云端存档的元数据 (saveInfo)
+    pub async fn get_cloud_save_info(&self, token: &str) -> AppResult<serde_json::Value> {
+        log::debug!("开始获取云端存档元数据 (saveInfo)...");
+        let summary = self.fetch_summary(token).await?;
+        log::debug!("成功获取云端存档元数据。");
+        Ok(summary)
+    }
 }

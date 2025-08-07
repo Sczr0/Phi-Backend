@@ -114,3 +114,35 @@ pub async fn get_cloud_saves_with_difficulty(
         data: Some(save),
     }))
 }
+/// 获取原始的云存档元数据 (saveInfo)
+///
+/// 直接从 Phigros 服务器获取并返回原始的 `saveInfo` JSON 对象，
+/// 不进行任何处理。用于需要访问最原始数据的场景。
+#[utoipa::path(
+    post,
+    path = "/get/cloud/saveInfo",
+    request_body = IdentifierRequest,
+    responses(
+        (status = 200, description = "成功获取原始云存档元数据", body = ApiResponse<serde_json::Value>)
+    )
+)]
+#[post("/get/cloud/saveInfo")]
+pub async fn get_cloud_save_info(
+    req: web::Json<IdentifierRequest>,
+    phigros_service: web::Data<PhigrosService>,
+    user_service: web::Data<UserService>,
+) -> AppResult<HttpResponse> {
+    debug!("接收到获取原始云存档元数据 (saveInfo) 的请求");
+    
+    let token = resolve_token(&req, &user_service).await?;
+    check_session_token(&token)?;
+    
+    let save_info = phigros_service.get_cloud_save_info(&token).await?;
+    
+    Ok(HttpResponse::Ok().json(ApiResponse {
+        code: 200,
+        status: "OK".to_string(),
+        message: None,
+        data: Some(save_info),
+    }))
+}

@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
 
 jobs:
+  # 任务一：构建和创建发布产物
   build-release:
     strategy:
       matrix:
@@ -35,21 +36,42 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: phi-backend-${{ matrix.target }}
+        # 这里的多行路径写法是正确的，它会尝试上传两个路径，
+        # 并优雅地忽略不存在的那个（例如在Linux上忽略.exe）
         path: |
           target/${{ matrix.target }}/release/${{ env.EXECUTABLE_NAME }}
           target/${{ matrix.target }}/release/${{ env.EXECUTABLE_NAME }}.exe
 
+  # 任务二：自动化部署到Linux服务器
   deploy-to-linux-server:
+    # 依赖于 build-release 任务，确保编译成功
     needs: build-release
+    # 仅在 main 分支的 push 事件时运行此任务
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
+    env:
+      EXECUTABLE_NAME: phi-backend-rust
+      PACKAGE_NAME: deploy_package.tar.gz
+
     steps:
+    # 第1步：检出代码，这样我们才能访问到 info 文件夹
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    # 第2步：下载编译好的 Linux 可执行文件
     - name: 下载 Linux 构建产物
       uses: actions/download-artifact@v4
       with:
         name: phi-backend-x86_64-unknown-linux-gnu
 
+    # 第3步：打包部署文件
+    - name: 创建部署压缩包
+      run: |
+        # 将可执行文件和 info 文件夹打包到一个 .tar.gz 文件中
+        tar -czf ${{ env.PACKAGE_NAME }} ${{ env.EXECUTABLE_NAME }} info/
+
+    # 第4步：安装 SSH Key 并连接服务器进行部署
     - name: 安装 SSH Key
       uses: shimataro/ssh-key-action@v2
       with:
@@ -63,8 +85,9 @@ jobs:
       env:
         DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-        EXECUTABLE_NAME: phi-backend-rust
       run: |
-        mv ${{ env.EXECUTABLE_NAME }} new_release_binary
-        scp ./new_release_binary ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}:~/new_release_binary
-        ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "bash /home/ecs-user/deploy_backend.sh ~/new_release_binary"
+        # 1. 将我们创建的压缩包上传到服务器的家目录
+        scp ./${{ env.PACKAGE_NAME }} ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}:~/
+
+        # 2. 远程执行服务器上的部署脚本，并将压缩包的路径作为参数传递
+        ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "bash /home/ecs-user/deploy_backend.sh ~/${{ env.PACKAGE_NAME }}"

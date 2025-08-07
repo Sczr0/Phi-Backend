@@ -4,16 +4,13 @@ use crate::utils::rks_utils;
 use crate::utils::cover_loader;
 use resvg::usvg::{self, Options as UsvgOptions, fontdb};
 use resvg::{render, tiny_skia::{Pixmap, Transform}};
-use std::path::{PathBuf, Path}; // Ensure Path is imported
+use std::path::{PathBuf, Path};
 use std::rc::Rc;
-// 确保导入了 FixedOffset 和 TimeZone
-use chrono::{DateTime, Utc, FixedOffset/*, TimeZone*/};
+use chrono::{DateTime, Utc, FixedOffset};
 use std::fmt::Write;
-use std::collections::{HashMap, HashSet}; // 导入 HashMap
-// use itertools::Itertools; // Remove unused import
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added
-// 导入 rand 相关
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use crate::models::player_archive::RKSRankingEntry;
