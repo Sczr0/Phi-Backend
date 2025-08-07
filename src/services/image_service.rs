@@ -23,7 +23,7 @@ use std::time::Duration;
 // --- ImageService 结构体定义 ---
 
 pub struct ImageService {
-    bn_image_cache: Cache<(u32, String), Arc<Vec<u8>>>,
+    bn_image_cache: Cache<(u32, String, crate::controllers::image::Theme), Arc<Vec<u8>>>,
     song_image_cache: Cache<(String, String), Arc<Vec<u8>>>,
     leaderboard_image_cache: Cache<usize, Arc<Vec<u8>>>,
 }
@@ -57,12 +57,13 @@ impl ImageService {
         &self,
         n: u32,
         identifier: web::Json<IdentifierRequest>,
+        theme: &crate::controllers::image::Theme,
         phigros_service: web::Data<PhigrosService>,
         user_service: web::Data<UserService>,
         player_archive_service: web::Data<PlayerArchiveService>,
     ) -> Result<Vec<u8>, AppError> {
         let token = resolve_token(&identifier, &user_service).await?;
-        let cache_key = (n, token.clone());
+        let cache_key = (n, token.clone(), theme.clone());
 
         let image_bytes_arc = self.bn_image_cache.try_get_with(
             cache_key,
@@ -119,7 +120,7 @@ impl ImageService {
                 let mut sorted_scores = all_scores;
                 sorted_scores.sort_by(|a, b| b.rks.partial_cmp(&a.rks).unwrap_or(Ordering::Equal));
 
-                let (_exact_rks, rounded_rks) = rks_utils::calculate_player_rks_details(&sorted_scores);
+                let (exact_rks, _rounded_rks) = rks_utils::calculate_player_rks_details(&sorted_scores);
 
                 let top_n_scores = sorted_scores.iter().take(n as usize).cloned().collect::<Vec<_>>();
 
@@ -151,15 +152,16 @@ impl ImageService {
                 let stats = PlayerStats {
                     ap_top_3_avg,
                     best_27_avg,
-                    real_rks: Some(rounded_rks),
+                    real_rks: Some(exact_rks),
                     player_name: player_nickname,
                     update_time: Utc::now(),
                     n,
                     ap_top_3_scores,
                 };
                 
+                let theme_clone = theme.clone();
                 let png_data = web::block(move || {
-                    let svg_string = image_renderer::generate_svg_string(&top_n_scores, &stats, Some(&push_acc_map))?;
+                    let svg_string = image_renderer::generate_svg_string(&top_n_scores, &stats, Some(&push_acc_map), &theme_clone)?;
                     image_renderer::render_svg_to_png(svg_string)
                 })
                 .await

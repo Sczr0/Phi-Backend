@@ -8,7 +8,7 @@ use std::path::{PathBuf, Path};
 use std::rc::Rc;
 use chrono::{DateTime, Utc, FixedOffset};
 use std::fmt::Write;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added
 use rand::seq::SliceRandom;
@@ -80,6 +80,7 @@ fn generate_card_svg(
     is_ap_score: bool, // Flag to indicate if the score itself is AP
     pre_calculated_push_acc: Option<f64>, // 新增：预先计算的推分ACC
     all_sorted_records: &[RksRecord], // 新增：所有排序好的成绩，用于新版推分计算
+    theme: &crate::controllers::image::Theme, // 新增：主题参数
 ) -> Result<(), AppError> {
     let fmt_err = |e| AppError::InternalError(format!("SVG formatting error: {}", e));
 
@@ -141,16 +142,24 @@ fn generate_card_svg(
          writeln!(svg, r#"<image href="{}" x="{}" y="{}" width="{:.1}" height="{:.1}" clip-path="url(#{})" />"#,
                   escaped_href, cover_x, cover_y, cover_size_w, cover_size_h, clip_path_id).map_err(fmt_err)?;
     } else {
-         writeln!(svg, "<rect x='{}' y='{}' width='{:.1}' height='{:.1}' fill='#333' rx='4' ry='4'/>",
-                  cover_x, cover_y, cover_size_w, cover_size_h).map_err(fmt_err)?;
+        let placeholder_color = match theme {
+            crate::controllers::image::Theme::White => "#DDD",
+            crate::controllers::image::Theme::Black => "#333",
+        };
+        writeln!(svg, "<rect x='{}' y='{}' width='{:.1}' height='{:.1}' fill='{}' rx='4' ry='4'/>",
+                 cover_x, cover_y, cover_size_w, cover_size_h, placeholder_color).map_err(fmt_err)?;
     }
 
     // Text content positioning
     let text_x = cover_x + cover_size_w + 15.0; // Padding between cover and text
     let text_width = (card_width as f64) - text_x - card_padding; // Available width for text
 
+    // 新增一个垂直偏移量，用于微调文本块的整体位置
+    // 可以调整这个值，直到视觉效果满意为止。数值越大，文本越往下。
+    let vertical_text_offset = 4; 
+
     // Calculate Y positions for text lines to align with cover
-    let song_name_y = cover_y + text_line_height_song * 0.75; // Adjust baseline alignment
+    let song_name_y = cover_y + text_line_height_song * 0.75 + vertical_text_offset;
     let score_y = song_name_y + text_line_height_score * 0.8 + text_block_spacing;
     let acc_y = score_y + text_line_height_acc + text_block_spacing;
     let level_y = acc_y + text_line_height_level + text_block_spacing;
@@ -266,6 +275,7 @@ pub fn generate_svg_string(
     scores: &[RksRecord],
     stats: &PlayerStats,
     push_acc_map: Option<&HashMap<String, f64>>, // 新增：预先计算的推分ACC映射，键为"曲目ID-难度"
+    theme: &crate::controllers::image::Theme, // 新增：主题参数
 ) -> Result<String, AppError> {
     // ... (width, height calculations etc. - keep these as they were) ...
     let width = 1200;
@@ -297,6 +307,12 @@ pub fn generate_svg_string(
     let content_height = (calculated_card_height + main_card_padding_outer) * rows.max(1);
     let total_height = header_height + ap_section_height + content_height + footer_height + 10;
 
+
+    // 根据主题定义颜色变量
+    let (bg_color, text_color, card_bg_color, card_stroke_color, text_secondary_color, fc_stroke_color, ap_stroke_color) = match theme {
+        crate::controllers::image::Theme::White => ("#FFFFFF", "#000000", "#F0F0F0", "#DDDDDD", "#666666", "#4682B4", "url(#ap-gradient)"),
+        crate::controllers::image::Theme::Black => ("#141826", "#FFFFFF", "#1A1E2A", "#333848", "#BBBBBB", "#87CEEB", "url(#ap-gradient)"),
+    };
 
     let mut svg = String::new();
     let fmt_err = |e| AppError::InternalError(format!("SVG formatting error: {}", e));
@@ -358,15 +374,22 @@ pub fn generate_svg_string(
     writeln!(svg, "<defs>").map_err(fmt_err)?;
 
     // Background Gradient (Fallback)
-    writeln!(svg, r#"<linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#141826" /><stop offset="100%" style="stop-color:#252E48" /></linearGradient>"#).map_err(fmt_err)?;
+    match theme {
+        crate::controllers::image::Theme::White => {
+            writeln!(svg, r#"<linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#FFFFFF" /><stop offset="100%" style="stop-color:#F0F0F0" /></linearGradient>"#).map_err(fmt_err)?;
+        }
+        crate::controllers::image::Theme::Black => {
+            writeln!(svg, r#"<linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#141826" /><stop offset="100%" style="stop-color:#252E48" /></linearGradient>"#).map_err(fmt_err)?;
+        }
+    }
 
     // Shadow Filter Definition
     writeln!(svg, r#"<filter id="card-shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="rgba(0,0,0,0.25)" flood-opacity="0.25" /></filter>"#).map_err(fmt_err)?;
 
     // Gaussian Blur Filter Definition
     writeln!(svg, r#"<filter id="bg-blur">"#).map_err(fmt_err)?;
-    // 调整 stdDeviation 控制模糊程度, 15 是一个比较强的模糊效果
-    writeln!(svg, r#"<feGaussianBlur stdDeviation="15" />"#).map_err(fmt_err)?;
+    // 调整 stdDeviation 控制模糊程度, 10 是一个比较强的模糊效果
+    writeln!(svg, r#"<feGaussianBlur stdDeviation="10" />"#).map_err(fmt_err)?;
     writeln!(svg, r#"</filter>"#).map_err(fmt_err)?;
 
     // Font style ... (保持不变) ...
@@ -375,36 +398,43 @@ pub fn generate_svg_string(
         svg,
         r#"
         /* <![CDATA[ */
-        svg {{ background-color: #141826; /* Fallback background color */ }}
+        svg {{ background-color: {bg_color}; /* Fallback background color */ }}
         .card {{
-            fill: #1A1E2A;
-            stroke: #333848;
+            fill: {card_bg_color};
+            stroke: {card_stroke_color};
             stroke-width: 1;
             filter: url(#card-shadow);
             transition: all 0.3s ease;
         }}
         .card-ap {{
-          stroke: url(#ap-gradient);
+          stroke: {ap_stroke_color};
           stroke-width: 2;
         }}
         .card-fc {{
-          stroke: #87CEEB; /* Light Sky Blue */
+          stroke: {fc_stroke_color}; /* Light Sky Blue */
           stroke-width: 2;
         }}
         /* ... (其他样式保持不变) ... */
-        .text-title {{ font-size: 34px; fill: white; /* font-weight: bold; */ text-shadow: 0px 2px 4px rgba(0, 0, 0, 0.4); }}
-        .text-stat {{ font-size: 21px; fill: #E0E0E0; }}
-        .text-time {{ font-size: 14px; fill: #999; text-anchor: end; }}
-        .text-footer {{ font-size: 13px; fill: #888; }}
-        .text-songname {{ font-size: 19px; fill: white; /* font-weight: bold; */ }}
-        .text-score {{ font-size: 26px; fill: white; /* font-weight: bold; */ }}
-        .text-acc {{ font-size: 14px; fill: #bbb; }}
-        .text-level {{ font-size: 14px; fill: #bbb; }}
-        .text-rank {{ font-size: 14px; fill: #999; text-anchor: end; }}
-        .text-section-title {{ font-size: 21px; fill: white; /* font-weight: bold; */ }}
+        .text-title {{ font-size: 34px; fill: {text_color}; /* font-weight: bold; */ text-shadow: 0px 2px 4px rgba(0, 0, 0, 0.4); }}
+        .text-stat {{ font-size: 21px; fill: {text_color}; }}
+        .text-time {{ font-size: 14px; fill: {text_secondary_color}; text-anchor: end; }}
+        .text-footer {{ font-size: 13px; fill: {text_secondary_color}; }}
+        .text-songname {{ font-size: 19px; fill: {text_color}; /* font-weight: bold; */ }}
+        .text-score {{ font-size: 26px; fill: {text_color}; /* font-weight: bold; */ }}
+        .text-acc {{ font-size: 14px; fill: {text_secondary_color}; }}
+        .text-level {{ font-size: 14px; fill: {text_secondary_color}; }}
+        .text-rank {{ font-size: 14px; fill: {text_secondary_color}; text-anchor: end; }}
+        .text-section-title {{ font-size: 21px; fill: {text_color}; /* font-weight: bold; */ }}
         * {{ font-family: "{font_name}", "Microsoft YaHei", "SimHei", "DengXian", Arial, sans-serif; }}
         /* ]]> */
         "#,
+        bg_color = bg_color,
+        text_color = text_color,
+        card_bg_color = card_bg_color,
+        card_stroke_color = card_stroke_color,
+        text_secondary_color = text_secondary_color,
+        fc_stroke_color = fc_stroke_color,
+        ap_stroke_color = ap_stroke_color,
         font_name = MAIN_FONT_NAME
     ).map_err(fmt_err)?;
     writeln!(svg, "</style>").map_err(fmt_err)?;
@@ -414,6 +444,12 @@ pub fn generate_svg_string(
     writeln!(svg, r#"<linearGradient id="ap-gradient" x1="0%" y1="0%" x2="100%" y2="100%">"#).map_err(fmt_err)?;
     writeln!(svg, "<stop offset=\"0%\" style=\"stop-color:#FFDA63\" />").map_err(fmt_err)?;
     writeln!(svg, "<stop offset=\"100%\" style=\"stop-color:#D1913C\" />").map_err(fmt_err)?;
+    writeln!(svg, r#"</linearGradient>"#).map_err(fmt_err)?;
+    
+    // 暂时不为白色主题定义更暗的AP渐变
+    writeln!(svg, r#"<linearGradient id="ap-gradient-white" x1="0%" y1="0%" x2="100%" y2="100%">"#).map_err(fmt_err)?;
+    writeln!(svg, "<stop offset=\"0%\" style=\"stop-color:#D4A017\" />").map_err(fmt_err)?; // 更暗的金色
+    writeln!(svg, "<stop offset=\"100%\" style=\"stop-color:#B8860B\" />").map_err(fmt_err)?; // 更暗的金色
     writeln!(svg, r#"</linearGradient>"#).map_err(fmt_err)?;
 
     writeln!(svg, "</defs>").map_err(fmt_err)?;
@@ -428,7 +464,14 @@ pub fn generate_svg_string(
         ).map_err(fmt_err)?;
         // 可选：在模糊背景上加一层半透明叠加层，使前景文字更清晰
         // 调整 rgba 最后一个值 (alpha) 控制透明度, 0.7 = 70% 不透明
-        writeln!(svg, r#"<rect width="100%" height="100%" fill="rgba(20, 24, 38, 0.7)" />"#).map_err(fmt_err)?;
+        match theme {
+            crate::controllers::image::Theme::White => {
+                writeln!(svg, r#"<rect width="100%" height="100%" fill="rgba(255, 255, 255, 0.7)" />"#).map_err(fmt_err)?;
+            }
+            crate::controllers::image::Theme::Black => {
+                writeln!(svg, r#"<rect width="100%" height="100%" fill="rgba(20, 24, 38, 0.7)" />"#).map_err(fmt_err)?;
+            }
+        }
     } else {
         // 回退到渐变背景
         writeln!(svg, r#"<rect width="100%" height="100%" fill="url(#bg-gradient)"/>"#).map_err(fmt_err)?;
@@ -439,7 +482,7 @@ pub fn generate_svg_string(
     // --- Header ---
     let player_name = stats.player_name.as_deref().unwrap_or("Phigros Player");
     let real_rks = stats.real_rks.unwrap_or(0.0);
-    writeln!(svg, r#"<text x="40" y="55" class="text-title">{}({:.2})</text>"#, escape_xml(player_name), real_rks).map_err(fmt_err)?;
+    writeln!(svg, r#"<text x="40" y="55" class="text-title">{}({:.6})</text>"#, escape_xml(player_name), real_rks).map_err(fmt_err)?;
     let ap_text = match stats.ap_top_3_avg {
         Some(avg) => format!("AP Top 3 Avg: {:.4}", avg),
         None => "AP Top 3 Avg: N/A".to_string(),
@@ -453,8 +496,8 @@ pub fn generate_svg_string(
     let update_time = format!("Updated at {} UTC", stats.update_time.format("%Y/%m/%d %H:%M:%S"));
     writeln!(svg, r#"<text x="{}" y="110" class="text-time">{}</text>"#, width - 30, update_time).map_err(fmt_err)?;
 
-    writeln!(svg, "<line x1='40' y1='{}' x2='{}' y2='{}' stroke='#333848' stroke-width='1' stroke-opacity='0.7'/>",
-             header_height, width - 40, header_height).map_err(fmt_err)?;
+    writeln!(svg, "<line x1='40' y1='{}' x2='{}' y2='{}' stroke='{}' stroke-width='1' stroke-opacity='0.7'/>",
+             header_height, width - 40, header_height, card_stroke_color).map_err(fmt_err)?;
 
 
     // --- AP Top 3 Section --- (保持不变) ...
@@ -470,7 +513,7 @@ pub fn generate_svg_string(
                 map.get(&key).copied()
             });
             
-            generate_card_svg(&mut svg, score, idx, x_pos, ap_card_start_y, main_card_width, true, true, push_acc, scores)?;
+            generate_card_svg(&mut svg, score, idx, x_pos, ap_card_start_y, main_card_width, true, true, push_acc, scores, theme)?;
         }
         writeln!(svg, r#"</g>"#).map_err(fmt_err)?;
     }
@@ -491,7 +534,7 @@ pub fn generate_svg_string(
             map.get(&key).copied()
         });
         
-        generate_card_svg(&mut svg, score, index, x, y, main_card_width, false, is_ap_score, push_acc, scores)?;
+        generate_card_svg(&mut svg, score, index, x, y, main_card_width, false, is_ap_score, push_acc, scores, theme)?;
     }
 
 
@@ -736,7 +779,7 @@ pub fn generate_song_svg_string(
     // ... existing gradient and filter definitions ...
     writeln!(svg, r#"<linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#141826" /><stop offset="100%" style="stop-color:#252E48" /></linearGradient>"#).map_err(fmt_err)?;
     writeln!(svg, r#"<filter id="card-shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="rgba(0,0,0,0.25)" flood-opacity="0.25" /></filter>"#).map_err(fmt_err)?;
-    writeln!(svg, r#"<filter id="bg-blur"><feGaussianBlur stdDeviation="15" /></filter>"#).map_err(fmt_err)?;
+    writeln!(svg, r#"<filter id="bg-blur"><feGaussianBlur stdDeviation="10" /></filter>"#).map_err(fmt_err)?;
     writeln!(svg, r#"<linearGradient id="rks-gradient" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#FDC830" /><stop offset="100%" style="stop-color:#F37335" /></linearGradient>"#).map_err(fmt_err)?;
     writeln!(svg, r#"<linearGradient id="rks-gradient-ap" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#f6d365" /><stop offset="100%" style="stop-color:#fda085" /></linearGradient>"#).map_err(fmt_err)?;
     writeln!(svg, r#"<linearGradient id="rks-gradient-push" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#a8e063" /><stop offset="100%" style="stop-color:#56ab2f" /></linearGradient>"#).map_err(fmt_err)?;

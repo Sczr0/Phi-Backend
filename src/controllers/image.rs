@@ -10,6 +10,25 @@ use crate::services::song::SongService;
 use crate::services::player_archive_service::PlayerArchiveService;
 use crate::utils::error::AppError;
 
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    Black,
+    White,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Theme::Black
+    }
+}
+
+#[derive(Deserialize, Debug, ToSchema, IntoParams)]
+pub struct BnImageQuery {
+    #[serde(default)]
+    pub theme: Theme,
+}
+
 #[derive(Deserialize, Debug, ToSchema, IntoParams)]
 pub struct SongImageQuery {
     /// 歌曲的名称、ID或别名
@@ -29,7 +48,8 @@ pub struct LeaderboardQuery {
     post,
     path = "/bn/{n}",
     params(
-        ("n" = u32, Path, description = "要生成的Best N图片")
+        ("n" = u32, Path, description = "要生成的Best N图片"),
+        BnImageQuery
     ),
     request_body = IdentifierRequest,
     responses(
@@ -39,6 +59,7 @@ pub struct LeaderboardQuery {
 #[post("/bn/{n}")]
 pub async fn generate_bn_image(
     path: web::Path<u32>,
+    query: web::Query<BnImageQuery>,
     req: web::Json<IdentifierRequest>,
     phigros_service: web::Data<PhigrosService>,
     user_service: web::Data<UserService>,
@@ -54,6 +75,7 @@ pub async fn generate_bn_image(
     let image_bytes = image_service.generate_bn_image(
         n,
         req,
+        &query.theme,
         phigros_service,
         user_service,
         player_archive_service

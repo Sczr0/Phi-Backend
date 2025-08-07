@@ -1,5 +1,5 @@
 use actix_web::web;
-use crate::controllers::image_controller::{generate_bn_image, generate_song_image}; // 导入新的控制器函数
+use crate::controllers::image::{generate_bn_image, generate_song_image}; // 导入新的控制器函数
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
