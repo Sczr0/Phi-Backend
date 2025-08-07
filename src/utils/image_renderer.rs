@@ -158,18 +158,49 @@ fn generate_card_svg(
     let acc_y = score_y + text_line_height_acc + text_block_spacing;
     let level_y = acc_y + text_line_height_level + text_block_spacing;
 
-    // Song Name - 截断逻辑
-    let max_char_width_approx = 11.0; // 大致估计每个字符的平均宽度
-    let max_name_len = (text_width / max_char_width_approx).max(8.0) as usize; // 计算能容纳的最大字符数
-    let song_name = if score.song_name.chars().count() > max_name_len {
-        // 使用 saturating_sub 避免负数长度
-        format!("{}...", score.song_name.chars().take(max_name_len.saturating_sub(3)).collect::<String>())
-    } else {
-        score.song_name.clone()
-    };
+    // --- Song Name (智能判断是否需要压缩) ---
 
-    // 移除 textLength 和 lengthAdjust
-    writeln!(svg, r#"<text x="{}" y="{:.1}" class="text-songname">{}</text>"#, text_x, song_name_y, escape_xml(&song_name)).map_err(fmt_err)?;
+// 1. 定义一个简单的函数来判断字符是否为全角（主要针对中日韩字符）
+fn is_full_width(ch: char) -> bool {
+// 这个范围覆盖了常见的中日韩统一表意文字、平假名、片假名和全角符号
+    (ch >= '\u{4E00}' && ch <= '\u{9FFF}') || // CJK Unified Ideographs
+    (ch >= '\u{3040}' && ch <= '\u{30FF}') || // Hiragana and Katakana
+    (ch >= '\u{FF00}' && ch <= '\u{FFEF}')    // Full-width forms
+}
+
+// 2. 估算文本渲染后的大致宽度
+let mut estimated_width = 0.0;
+// 根据CSS样式，.text-songname 的 font-size 是 19px。
+// 全角字符宽度约等于字号，半角字符宽度约为一半。这里我们用稍大的值做估算。
+let full_width_char_px = 19.0;
+let half_width_char_px = 10.5; // 英文、数字等半角字符的平均宽度估值
+
+for ch in score.song_name.chars() {
+    if is_full_width(ch) {
+        estimated_width += full_width_char_px;
+    } else {
+        estimated_width += half_width_char_px;
+    }
+}
+
+// 3. 根据估算结果，决定是否启用SVG压缩
+let song_name_escaped = escape_xml(&score.song_name);
+
+if estimated_width > text_width {
+    // 估算宽度超过了可用空间，启用 textLength 进行压缩
+    writeln!(
+        svg,
+        r#"<text x="{}" y="{:.1}" class="text-songname" textLength="{:.1}" lengthAdjust="spacingAndGlyphs">{}</text>"#,
+        text_x, song_name_y, text_width, song_name_escaped
+    ).map_err(fmt_err)?;
+} else {
+    // 估算宽度足够，正常渲染，不压缩也不拉伸
+    writeln!(
+        svg,
+        r#"<text x="{}" y="{:.1}" class="text-songname">{}</text>"#,
+        text_x, song_name_y, song_name_escaped
+    ).map_err(fmt_err)?;
+}
 
     // Score
     let score_text = score.score.map_or("N/A".to_string(), |s| format!("{:.0}", s));
