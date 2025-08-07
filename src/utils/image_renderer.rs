@@ -156,7 +156,7 @@ fn generate_card_svg(
 
     // 新增一个垂直偏移量，用于微调文本块的整体位置
     // 可以调整这个值，直到视觉效果满意为止。数值越大，文本越往下。
-    let vertical_text_offset = 4; 
+    let vertical_text_offset = 4.0; 
 
     // Calculate Y positions for text lines to align with cover
     let song_name_y = cover_y + text_line_height_song * 0.75 + vertical_text_offset;
