@@ -5,15 +5,19 @@ use crate::utils::cover_loader;
 use resvg::usvg::{self, Options as UsvgOptions, fontdb};
 use resvg::{render, tiny_skia::{Pixmap, Transform}};
 use std::path::{PathBuf, Path};
+use std::num::NonZeroUsize;
 use std::rc::Rc;
+use std::sync::Mutex;
 use chrono::{DateTime, Utc, FixedOffset};
 use std::fmt::Write;
 use std::collections::HashMap;
 use std::fs;
+use std::sync::{Arc, OnceLock};
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use crate::models::player_archive::RKSRankingEntry;
+use lru::LruCache;
 
 
 #[allow(dead_code)]
@@ -67,6 +71,114 @@ const MAIN_FONT_NAME: &str = "思源黑体 CN";
 const COVER_ASPECT_RATIO: f64 = 512.0 / 270.0;
 #[allow(dead_code)]
 const SONG_ILLUST_ASPECT_RATIO: f64 = 1.0; // 假设单曲图的插画是方形的
+
+// 全局字体数据库单例
+static GLOBAL_FONT_DB: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
+
+// 背景图片 LRU 缓存
+static BACKGROUND_IMAGE_CACHE: OnceLock<std::sync::Mutex<LruCache<PathBuf, String>>> = OnceLock::new();
+const BACKGROUND_CACHE_SIZE: usize = 10; // 缓存10张背景图片
+
+// 封面图片路径列表
+static COVER_FILES: OnceLock<Vec<PathBuf>> = OnceLock::new();
+
+/// 初始化全局字体数据库
+fn init_global_font_db() -> Arc<fontdb::Database> {
+    let mut font_db = fontdb::Database::new();
+    font_db.load_system_fonts();
+    
+    // 加载自定义字体
+    let fonts_dir = PathBuf::from(FONTS_DIR);
+    if fonts_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&fonts_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() &&
+                   (path.extension() == Some("ttf".as_ref()) ||
+                    path.extension() == Some("otf".as_ref())) {
+                    if let Err(e) = font_db.load_font_file(&path) {
+                        log::error!("加载字体文件失败 '{}': {}", path.display(), e);
+                    }
+                }
+            }
+        }
+    }
+    
+    Arc::new(font_db)
+}
+
+/// 获取全局字体数据库
+pub fn get_global_font_db() -> Arc<fontdb::Database> {
+    GLOBAL_FONT_DB.get_or_init(init_global_font_db).clone()
+}
+
+/// 初始化背景图片缓存和封面文件列表
+fn init_background_cache() -> (std::sync::Mutex<LruCache<PathBuf, String>>, Vec<PathBuf>) {
+    // 初始化 LRU 缓存
+    let cache = std::sync::Mutex::new(LruCache::new(NonZeroUsize::new(BACKGROUND_CACHE_SIZE).unwrap()));
+    
+    // 读取封面目录下的所有图片文件
+    let cover_base_path = PathBuf::from(cover_loader::COVERS_DIR).join("ill");
+    let cover_files = match fs::read_dir(&cover_base_path) {
+        Ok(entries) => entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file() &&
+                   (path.extension() == Some("png".as_ref()) ||
+                    path.extension() == Some("jpg".as_ref())))
+            .collect(),
+        Err(e) => {
+            log::error!("读取封面目录失败 '{}': {}", cover_base_path.display(), e);
+            Vec::new()
+        }
+    };
+    
+    (cache, cover_files)
+}
+
+/// 获取背景图片缓存
+pub fn get_background_cache() -> &'static std::sync::Mutex<LruCache<PathBuf, String>> {
+    BACKGROUND_IMAGE_CACHE.get_or_init(|| {
+        let (cache, _) = init_background_cache();
+        cache
+    })
+}
+
+/// 获取封面文件列表
+pub fn get_cover_files() -> &'static Vec<PathBuf> {
+    COVER_FILES.get_or_init(|| {
+        let (_, files) = init_background_cache();
+        files
+    })
+}
+
+/// 从缓存或磁盘加载背景图片
+fn get_background_image(path: &PathBuf) -> Option<String> {
+    let mut cache = get_background_cache().lock().unwrap();
+    
+    // 尝试从缓存中获取
+    if let Some(cached_image) = cache.get(path) {
+        return Some(cached_image.clone());
+    }
+    
+    // 缓存未命中，从磁盘加载
+    if let Ok(data) = fs::read(path) {
+        let mime_type = if path.extension().map_or(false, |ext| ext == "png") {
+            "image/png"
+        } else {
+            "image/jpeg"
+        };
+        let base64_encoded = base64_engine.encode(&data);
+        let image_data = format!("data:{};base64,{}", mime_type, base64_encoded);
+        
+        // 放入缓存
+        cache.put(path.clone(), image_data.clone());
+        
+        return Some(image_data);
+    }
+    
+    None
+}
 
 // Helper function to generate a single score card SVG group
 fn generate_card_svg(
@@ -321,45 +433,27 @@ pub fn generate_svg_string(
     let mut background_image_href = None;
     let _background_fill = "url(#bg-gradient)".to_string(); // Prefix unused variable
 
-    let cover_base_path = PathBuf::from(cover_loader::COVERS_DIR).join("ill"); // 指向 ill 目录
-    let cover_files: Vec<PathBuf> = match fs::read_dir(&cover_base_path) {
-        Ok(entries) => entries
-            .filter_map(|entry| entry.ok()) // Ignore read errors for individual entries
-            .map(|entry| entry.path())
-            .filter(|path| path.is_file() && (path.extension() == Some("png".as_ref()) || path.extension() == Some("jpg".as_ref())))
-            .collect(),
-        Err(e) => {
-            log::error!("读取封面目录失败 '{}': {}", cover_base_path.display(), e);
-            Vec::new() // Empty vec, will fallback to gradient
-        }
-    };
-
+    // 获取封面文件列表
+    let cover_files = get_cover_files();
+    
     if !cover_files.is_empty() {
         let mut rng = thread_rng();
         if let Some(random_path) = cover_files.choose(&mut rng) { // 随机选择一个路径
-            match fs::read(random_path) { // 读取随机选择的文件
-                Ok(data) => {
-                    let mime_type = if random_path.extension().map_or(false, |ext| ext == "png") {
-                        "image/png"
-                    } else {
-                        "image/jpeg"
-                    };
-                    let base64_encoded = base64_engine.encode(&data); // Base64 编码
-                    background_image_href = Some(format!("data:{};base64,{}", mime_type, base64_encoded));
-                    log::info!("使用随机背景图: {}", random_path.display());
-                }
-                Err(e) => {
-                    log::error!("读取随机背景封面文件失败 '{}': {}", random_path.display(), e);
-                    // 读取失败则回退到渐变
-                }
+            // 使用缓存函数获取背景图片
+            if let Some(image_data) = get_background_image(random_path) {
+                background_image_href = Some(image_data);
+                log::info!("使用随机背景图: {}", random_path.display());
+            } else {
+                log::error!("获取背景图片失败: {}", random_path.display());
+                // 获取失败则回退到渐变
             }
         } else {
-             log::warn!("无法从封面文件列表中随机选择一个");
-             // Fallback to gradient if choose fails (shouldn't happen with non-empty list)
+            log::warn!("无法从封面文件列表中随机选择一个");
+            // Fallback to gradient if choose fails (shouldn't happen with non-empty list)
         }
     } else {
-         log::warn!("在 '{}' 目录中找不到任何 .png 或 .jpg 封面用于随机背景", cover_base_path.display());
-         // Fallback to gradient if directory is empty or read failed
+        log::warn!("找不到任何封面文件用于随机背景");
+        // Fallback to gradient if directory is empty or read failed
     }
     // --- 背景图获取结束 ---
 
@@ -558,9 +652,8 @@ pub fn generate_svg_string(
 
 // ... (render_svg_to_png function - unchanged) ...
 pub fn render_svg_to_png(svg_data: String) -> Result<Vec<u8>, AppError> {
-    let mut font_db = fontdb::Database::new();
-    font_db.load_system_fonts();
-    load_custom_fonts(&mut font_db)?;
+    // 使用全局字体数据库
+    let font_db = get_global_font_db();
 
     let opts = UsvgOptions {
         resources_dir: Some(std::env::current_dir().map_err(|e|
@@ -574,7 +667,7 @@ pub fn render_svg_to_png(svg_data: String) -> Result<Vec<u8>, AppError> {
         ..Default::default()
     };
 
-    let font_db_rc = Rc::new(font_db);
+    let font_db_rc = Arc::clone(&font_db);
     let tree = usvg::Tree::from_data(&svg_data.as_bytes(), &opts, &font_db_rc)
         .map_err(|e| AppError::InternalError(format!("Failed to parse SVG: {}", e)))?;
 
@@ -702,39 +795,39 @@ pub fn generate_song_svg_string(
     let current_song_ill_path_png = PathBuf::from(cover_loader::COVERS_DIR).join("ill").join(format!("{}.png", data.song_id));
     let current_song_ill_path_jpg = PathBuf::from(cover_loader::COVERS_DIR).join("ill").join(format!("{}.jpg", data.song_id));
 
+    // 优先尝试使用当前曲目的曲绘作为背景
     if current_song_ill_path_png.exists() {
-        if let Ok(img_data) = fs::read(&current_song_ill_path_png) {
-            let base64_encoded = base64_engine.encode(&img_data);
-            background_image_href = Some(format!("data:image/png;base64,{}", base64_encoded));
+        // 使用缓存函数获取背景图片
+        if let Some(image_data) = get_background_image(&current_song_ill_path_png) {
+            background_image_href = Some(image_data);
             log::info!("使用当前曲目曲绘作为背景: {}", current_song_ill_path_png.display());
         }
     } else if current_song_ill_path_jpg.exists() {
-        if let Ok(img_data) = fs::read(&current_song_ill_path_jpg) {
-            let base64_encoded = base64_engine.encode(&img_data);
-            background_image_href = Some(format!("data:image/jpeg;base64,{}", base64_encoded));
+        // 使用缓存函数获取背景图片
+        if let Some(image_data) = get_background_image(&current_song_ill_path_jpg) {
+            background_image_href = Some(image_data);
             log::info!("使用当前曲目曲绘作为背景: {}", current_song_ill_path_jpg.display());
         }
     } else {
         // 如果找不到当前曲目的曲绘，则随机选一个
-        let cover_base_path = PathBuf::from(cover_loader::COVERS_DIR).join("ill");
-        let cover_files: Vec<PathBuf> = match fs::read_dir(&cover_base_path) {
-            Ok(entries) => entries.filter_map(Result::ok).map(|entry| entry.path()).filter(|path| path.is_file() && (path.extension() == Some("png".as_ref()) || path.extension() == Some("jpg".as_ref()))).collect(),
-            Err(e) => { log::error!("读取封面目录失败 '{}': {}", cover_base_path.display(), e); Vec::new() }
-        };
+        let cover_files = get_cover_files();
         if !cover_files.is_empty() {
             let mut rng = thread_rng();
             if let Some(random_path) = cover_files.choose(&mut rng) {
-                match fs::read(random_path) {
-                    Ok(img_data) => {
-                        let mime_type = if random_path.extension().map_or(false, |ext| ext == "png") { "image/png" } else { "image/jpeg" };
-                        let base64_encoded = base64_engine.encode(&img_data);
-                        background_image_href = Some(format!("data:{};base64,{}", mime_type, base64_encoded));
-                        log::info!("使用随机背景图: {}", random_path.display());
-                    },
-                    Err(e) => { log::error!("读取随机背景封面文件失败 '{}': {}", random_path.display(), e); }
+                // 使用缓存函数获取背景图片
+                if let Some(image_data) = get_background_image(random_path) {
+                    background_image_href = Some(image_data);
+                    log::info!("使用随机背景图: {}", random_path.display());
+                } else {
+                    log::error!("获取背景图片失败: {}", random_path.display());
+                    // 获取失败则回退到渐变
                 }
-            } else { log::warn!("无法从封面文件列表中随机选择一个"); }
-        } else { log::warn!("在 '{}' 目录中找不到任何 .png 或 .jpg 封面用于随机背景", cover_base_path.display()); }
+            } else {
+                log::warn!("无法从封面文件列表中随机选择一个");
+            }
+        } else {
+            log::warn!("找不到任何封面文件用于随机背景");
+        }
     }
 
     // --- SVG 头部和 Defs ---
