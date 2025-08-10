@@ -520,6 +520,11 @@ pub fn generate_svg_string(
 
     // Shadow Filter Definition
     writeln!(svg, r#"<filter id="card-shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="rgba(0,0,0,0.25)" flood-opacity="0.25" /></filter>"#).map_err(fmt_err)?;
+    
+    // FC Glow Filter Definition
+    writeln!(svg, r#"<filter id="fc-glow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="{}" flood-opacity="0.8" /></filter>"#, fc_stroke_color).map_err(fmt_err)?;
+
+    writeln!(svg, r#"<filter id="ap-glow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="{}" flood-opacity="0.8" /></filter>"#, fc_stroke_color).map_err(fmt_err)?;
 
     // Gaussian Blur Filter Definition
     writeln!(svg, r#"<filter id="bg-blur">"#).map_err(fmt_err)?;
@@ -543,11 +548,13 @@ pub fn generate_svg_string(
         }}
         .card-ap {{
           stroke: {ap_stroke_color};
-          stroke-width: 2;
+          stroke-width: 2.5;
+          filter: url(#ap-glow);
         }}
         .card-fc {{
           stroke: {fc_stroke_color}; /* Light Sky Blue */
-          stroke-width: 2;
+          stroke-width: 2.5;
+          filter: url(#fc-glow);
         }}
         /* ... (其他样式保持不变) ... */
         .text-title {{ font-size: 34px; fill: {text_color}; /* font-weight: bold; */ text-shadow: 0px 2px 4px rgba(0, 0, 0, 0.4); }}
