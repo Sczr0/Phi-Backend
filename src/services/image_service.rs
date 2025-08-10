@@ -149,6 +149,48 @@ impl ImageService {
                     })
                     .collect();
 
+                let (challenge_rank, data_string) = if let Some(game_progress) = &save.game_progress {
+                    // 1. 解析课题等级
+                    let rank = game_progress.get("challengeModeRank")
+                        .and_then(|v| v.as_i64())
+                        .and_then(|rank_num| {
+                            if rank_num <= 0 { return None; }
+                            let rank_str = rank_num.to_string();
+                            if rank_str.is_empty() { return None; }
+                            let (color_char, level_str) = rank_str.split_at(1);
+                            let color = match color_char {
+                                "1" => "Green",
+                                "2" => "Blue",
+                                "3" => "Red",
+                                "4" => "Gold",
+                                "5" => "Rainbow",
+                                _ => return None,
+                            };
+                            Some((color.to_string(), level_str.to_string()))
+                        });
+
+                    // 2. 格式化Data
+                    let money_str = game_progress.get("money")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            let units = ["KB", "MB", "GB", "TB"];
+                            let mut parts: Vec<String> = arr.iter().zip(units.iter())
+                                .filter_map(|(val, &unit)| val.as_u64().and_then(|u_val| if u_val > 0 { Some(format!("{} {}", u_val, unit)) } else { None }))
+                                .collect();
+                            parts.reverse(); // 从大单位开始显示
+                            if parts.is_empty() {
+                                None
+                            } else {
+                                Some(format!("Data: {}", parts.join(", ")))
+                            }
+                        })
+                        .flatten();
+                    
+                    (rank, money_str)
+                } else {
+                    (None, None)
+                };
+
                 let stats = PlayerStats {
                     ap_top_3_avg,
                     best_27_avg,
@@ -157,6 +199,8 @@ impl ImageService {
                     update_time: Utc::now(),
                     n,
                     ap_top_3_scores,
+                    challenge_rank,
+                    data_string,
                 };
                 
                 let theme_clone = theme.clone();

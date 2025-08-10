@@ -27,6 +27,8 @@ pub struct PlayerStats {
     pub update_time: DateTime<Utc>,
     pub n: u32,  // 请求的 Best N 数量
     pub ap_top_3_scores: Vec<RksRecord>, // 添加 AP Top 3 的具体成绩
+    pub challenge_rank: Option<(String, String)>, // 新增：课题等级 (颜色, 等级)
+    pub data_string: Option<String>, // 新增：格式化后的Data字符串
 }
 
 // 新增：单曲成绩渲染所需数据结构
@@ -270,7 +272,7 @@ fn generate_card_svg(
 
     // Calculate Y positions for text lines to align with cover
     let song_name_y = cover_y + text_line_height_song * 0.75 + vertical_text_offset;
-    let score_y = song_name_y + text_line_height_score * 0.8 + text_block_spacing;
+    let score_y = song_name_y + text_line_height_score * 0.8 + text_block_spacing + 2.0; // 分数部分向下移动2像素
     let acc_y = score_y + text_line_height_acc + text_block_spacing;
     let level_y = acc_y + text_line_height_level + text_block_spacing;
 
@@ -443,7 +445,8 @@ pub fn generate_svg_string(
         crate::controllers::image::Theme::White => ("#FFFFFF", "#000000", "#F0F0F0", "#DDDDDD", "#666666", "#4682B4", "url(#ap-gradient)"),
         crate::controllers::image::Theme::Black => ("#141826", "#FFFFFF", "#1A1E2A", "#333848", "#BBBBBB", "#87CEEB", "url(#ap-gradient)"),
     };
-
+    
+    let mut normal_card_stroke_color = "url(#normal-card-stroke-gradient)".to_string();
     let mut svg = String::new();
     let fmt_err = |e| AppError::InternalError(format!("SVG formatting error: {}", e));
 
@@ -470,6 +473,13 @@ pub fn generate_svg_string(
     if !background_files.is_empty() {
         let mut rng = thread_rng();
         if let Some(random_path) = background_files.choose(&mut rng) { // 随机选择一个路径
+            // --- 新增：计算背景主色的反色 ---
+            if let Some(inverse_color) = calculate_inverse_color_from_path(random_path) {
+                normal_card_stroke_color = inverse_color;
+                log::info!("使用背景反色作为卡片边框: {}", normal_card_stroke_color);
+            }
+            // --- 结束新增 ---
+
             // 使用缓存函数获取背景图片
             if let Some(image_data) = get_background_image(random_path) {
                 background_image_href = Some(image_data);
@@ -526,7 +536,7 @@ pub fn generate_svg_string(
         svg {{ background-color: {bg_color}; /* Fallback background color */ }}
         .card {{
             fill: {card_bg_color};
-            stroke: url(#normal-card-stroke-gradient);
+            stroke: {normal_card_stroke_color};
             stroke-width: 1.5;
             filter: url(#card-shadow);
             transition: all 0.3s ease;
@@ -542,6 +552,7 @@ pub fn generate_svg_string(
         /* ... (其他样式保持不变) ... */
         .text-title {{ font-size: 34px; fill: {text_color}; /* font-weight: bold; */ text-shadow: 0px 2px 4px rgba(0, 0, 0, 0.4); }}
         .text-stat {{ font-size: 21px; fill: {text_color}; }}
+        .text-info {{ font-size: 16px; fill: {text_secondary_color}; text-anchor: end; }} /* For new info */
         .text-time {{ font-size: 14px; fill: {text_secondary_color}; text-anchor: end; }}
         .text-footer {{ font-size: 13px; fill: {text_secondary_color}; }}
         .text-songname {{ font-size: 20px; fill: {text_color}; font-weight: 600; }}
@@ -560,6 +571,7 @@ pub fn generate_svg_string(
         text_color = text_color,
         card_bg_color = card_bg_color,
         text_secondary_color = text_secondary_color,
+        normal_card_stroke_color = normal_card_stroke_color,
         fc_stroke_color = fc_stroke_color,
         ap_stroke_color = ap_stroke_color,
         font_name = MAIN_FONT_NAME
@@ -573,7 +585,7 @@ pub fn generate_svg_string(
     writeln!(svg, "<stop offset=\"100%\" style=\"stop-color:#333848\" />").map_err(fmt_err)?; // 更深的灰色
     writeln!(svg, r#"</linearGradient>"#).map_err(fmt_err)?;
     
-    // Define AP card stroke gradient ... (保持不变) ...
+    // Define AP card stroke gradient
     writeln!(svg, r#"<linearGradient id="ap-gradient" x1="0%" y1="0%" x2="100%" y2="100%">"#).map_err(fmt_err)?;
     writeln!(svg, "<stop offset=\"0%\" style=\"stop-color:#FFDA63\" />").map_err(fmt_err)?;
     writeln!(svg, "<stop offset=\"100%\" style=\"stop-color:#D1913C\" />").map_err(fmt_err)?;
@@ -625,9 +637,33 @@ pub fn generate_svg_string(
     let bn_text = format!("Best 27 Avg: {}", b27_avg_str);
     writeln!(svg, r#"<text x="40" y="110" class="text-stat">{}</text>"#, bn_text).map_err(fmt_err)?;
 
-    // 修改右上角时间格式，添加 UTC 标识
+    // --- Right-aligned info (Data, Challenge, Time) ---
+    let mut info_y = 65.0; // Starting Y position for the top-right info block
+
+    // Data String
+    if let Some(data_str) = &stats.data_string {
+        writeln!(svg, r#"<text x="{}" y="{}" class="text-info">{}</text>"#, width - 30, info_y, escape_xml(data_str)).map_err(fmt_err)?;
+        info_y += 20.0; // Increment Y for the next line
+    }
+
+    // Challenge Rank
+    if let Some((color, level)) = &stats.challenge_rank {
+        let color_hex = match color.as_str() {
+            "Green" => "#51AF44",
+            "Blue" => "#3173B3",
+            "Red" => "#BE2D23",
+            "Gold" => "#D1913C",
+            "Rainbow" => "url(#ap-gradient)", // Use existing gold gradient for rainbow for now
+            _ => text_secondary_color,
+        };
+        writeln!(svg, r#"<text x="{}" y="{}" class="text-info">Challenge: <tspan fill="{}">{}</tspan> {}</text>"#,
+                 width - 30, info_y, color_hex, color, level).map_err(fmt_err)?;
+        info_y += 20.0; // Increment Y for the next line
+    }
+
+    // Update Time (always displayed)
     let update_time = format!("Updated at {} UTC", stats.update_time.format("%Y/%m/%d %H:%M:%S"));
-    writeln!(svg, r#"<text x="{}" y="110" class="text-time">{}</text>"#, width - 30, update_time).map_err(fmt_err)?;
+    writeln!(svg, r#"<text x="{}" y="{}" class="text-time">{}</text>"#, width - 30, info_y, update_time).map_err(fmt_err)?;
 
     writeln!(svg, "<line x1='40' y1='{}' x2='{}' y2='{}' stroke='{}' stroke-width='1' stroke-opacity='0.7'/>",
              header_height, width - 40, header_height, card_stroke_color).map_err(fmt_err)?;
@@ -731,7 +767,43 @@ fn escape_xml(input: &str) -> String {
         .replace('\'', "&apos;")
 }
 
+/// 从图片路径计算主色的反色
+fn calculate_inverse_color_from_path(path: &Path) -> Option<String> {
+    // 使用 image crate 打开图片
+    let img = image::open(path).ok()?;
+    let pixels = img.to_rgba8().into_raw();
 
+    if pixels.is_empty() {
+        return None;
+    }
+
+    let mut total_r: u64 = 0;
+    let mut total_g: u64 = 0;
+    let mut total_b: u64 = 0;
+
+    // 像素数据是扁平的 [R, G, B, A, R, G, B, A, ...] 数组
+    for chunk in pixels.chunks_exact(4) {
+        total_r += u64::from(chunk[0]);
+        total_g += u64::from(chunk[1]);
+        total_b += u64::from(chunk[2]);
+    }
+
+    let num_pixels = (pixels.len() / 4) as u64;
+    if num_pixels == 0 { return None; }
+
+    let avg_r = (total_r / num_pixels) as u8;
+    let avg_g = (total_g / num_pixels) as u8;
+    let avg_b = (total_b / num_pixels) as u8;
+
+    // 计算反色
+    let inv_r = 255 - avg_r;
+    let inv_g = 255 - avg_g;
+    let inv_b = 255 - avg_b;
+
+    Some(format!("#{:02X}{:02X}{:02X}", inv_r, inv_g, inv_b))
+}
+
+/// 从图片路径计算主色的反色
 // ... (load_custom_fonts function - unchanged) ...
 fn load_custom_fonts(font_db: &mut fontdb::Database) -> Result<(), AppError> {
     let fonts_dir = PathBuf::from(FONTS_DIR);
