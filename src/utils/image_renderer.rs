@@ -6,8 +6,6 @@ use resvg::usvg::{self, Options as UsvgOptions, fontdb};
 use resvg::{render, tiny_skia::{Pixmap, Transform}};
 use std::path::{PathBuf, Path};
 use std::num::NonZeroUsize;
-use std::rc::Rc;
-use std::sync::Mutex;
 use chrono::{DateTime, Utc, FixedOffset};
 use std::fmt::Write;
 use std::collections::HashMap;
@@ -342,13 +340,13 @@ if estimated_width > text_width {
 
         // 如果推分acc非常接近100，直接显示 -> 100.00%
         if push_acc > 99.995 {
-             format!("Acc: {:.2}% -> 100.00%", score.acc)
+             format!("Acc: {:.2}% <tspan class='push-acc'>-> 100.00%</tspan>", score.acc)
         }
         // 如果两者差值非常小(小于0.005，对应四舍五入后两位不变)，则展示三位小数
         else if (push_acc - score.acc).abs() < 0.005 {
-            format!("Acc: {:.2}% -> {:.3}%", score.acc, push_acc)
+            format!("Acc: {:.2}% <tspan class='push-acc'>-> {:.3}%</tspan>", score.acc, push_acc)
         } else {
-            format!("Acc: {:.2}% -> {:.2}%", score.acc, push_acc)
+            format!("Acc: {:.2}% <tspan class='push-acc'>-> {:.2}%</tspan>", score.acc, push_acc)
         }
     } else {
         // AP或者已满分或者定数为0，只显示当前acc
@@ -357,23 +355,43 @@ if estimated_width > text_width {
     writeln!(svg, r#"<text x="{}" y="{:.1}" class="text-acc">{}</text>"#, text_x, acc_y, acc_text).map_err(fmt_err)?;
 
     // Level & RKS
-    // 获取难度标签文本
-    let difficulty_text = match &score.difficulty {
-        diff if diff.eq_ignore_ascii_case("EZ") => "EZ",
-        diff if diff.eq_ignore_ascii_case("HD") => "HD",
-        diff if diff.eq_ignore_ascii_case("IN") => "IN",
-        diff if diff.eq_ignore_ascii_case("AT") => "AT",
-        _ => "??"
+    // 获取难度标签文本和颜色
+    let (difficulty_text, difficulty_color) = match &score.difficulty {
+        diff if diff.eq_ignore_ascii_case("EZ") => ("EZ", "#51AF44"), // 绿色
+        diff if diff.eq_ignore_ascii_case("HD") => ("HD", "#3173B3"), // 蓝色
+        diff if diff.eq_ignore_ascii_case("IN") => ("IN", "#BE2D23"), // 红色
+        diff if diff.eq_ignore_ascii_case("AT") => ("AT", "#383838"), // 深灰色
+        _ => ("??", "#888888") // 默认灰色
     };
 
-    // Level & RKS (现在包含难度标签)
-    let level_text = format!("{} Lv.{} -> {:.2}", difficulty_text, score.difficulty_value, score.rks);
+    // 难度标签尺寸
+    let badge_width = 36.0;
+    let badge_height = 20.0;
+    let badge_radius = 4.0;
+    // 将标签放置在曲绘左下角
+    let badge_x = cover_x + 5.0; // 曲绘左侧留出5px边距
+    let badge_y = cover_y + cover_size_h - badge_height - 5.0; // 曲绘底部留出5px边距
+
+    // 绘制难度标签背景
+    writeln!(svg, r#"<rect x="{}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{:.1}" ry="{:.1}" fill="{}" />"#,
+             badge_x, badge_y, badge_width, badge_height, badge_radius, badge_radius, difficulty_color).map_err(fmt_err)?;
+
+    // 绘制难度标签文本
+    let badge_text_x = badge_x + badge_width / 2.0;
+    let badge_text_y = badge_y + badge_height / 2.0 + 5.0; // 垂直居中
+    writeln!(svg, r#"<text x="{:.1}" y="{:.1}" class="text-difficulty-badge" text-anchor="middle" fill="white">{}</text>"#,
+             badge_text_x, badge_text_y, difficulty_text).map_err(fmt_err)?;
+
+    // 恢复等级和RKS的简单字符串拼接
+    let level_text = format!("Lv.{} -> {:.2}", score.difficulty_value, score.rks);
     writeln!(svg, r#"<text x="{}" y="{:.1}" class="text-level">{}</text>"#, text_x, level_y, level_text).map_err(fmt_err)?;
 
     // Rank (Only for main scores, not AP)
     if !is_ap_card {
         let rank_text = format!("#{}", index + 1);
-        writeln!(svg, r#"<text x="{}" y="{:.1}" class="text-rank">{}</text>"#, (card_width as f64) - card_padding, level_y, rank_text).map_err(fmt_err)?;
+        // 将坐标改回右下角
+        writeln!(svg, r#"<text x="{}" y="{:.1}" class="text-rank">{}</text>"#,
+                 (card_width as f64) - card_padding, level_y, rank_text).map_err(fmt_err)?;
     }
 
     writeln!(svg, "</g>").map_err(fmt_err)?; // End card group
@@ -433,12 +451,25 @@ pub fn generate_svg_string(
     let mut background_image_href = None;
     let _background_fill = "url(#bg-gradient)".to_string(); // Prefix unused variable
 
-    // 获取封面文件列表
-    let cover_files = get_cover_files();
+    // 专门为背景图获取 illBlur 目录的文件列表
+    let background_base_path = PathBuf::from(cover_loader::COVERS_DIR).join("illBlur");
+    let background_files = match fs::read_dir(&background_base_path) {
+        Ok(entries) => entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file() &&
+                   (path.extension() == Some("png".as_ref()) ||
+                    path.extension() == Some("jpg".as_ref())))
+            .collect::<Vec<PathBuf>>(),
+        Err(e) => {
+            log::error!("读取背景目录失败 '{}': {}", background_base_path.display(), e);
+            Vec::new()
+        }
+    };
     
-    if !cover_files.is_empty() {
+    if !background_files.is_empty() {
         let mut rng = thread_rng();
-        if let Some(random_path) = cover_files.choose(&mut rng) { // 随机选择一个路径
+        if let Some(random_path) = background_files.choose(&mut rng) { // 随机选择一个路径
             // 使用缓存函数获取背景图片
             if let Some(image_data) = get_background_image(random_path) {
                 background_image_href = Some(image_data);
@@ -448,11 +479,11 @@ pub fn generate_svg_string(
                 // 获取失败则回退到渐变
             }
         } else {
-            log::warn!("无法从封面文件列表中随机选择一个");
+            log::warn!("无法从背景文件列表中随机选择一个");
             // Fallback to gradient if choose fails (shouldn't happen with non-empty list)
         }
     } else {
-        log::warn!("找不到任何封面文件用于随机背景");
+        log::warn!("找不到任何背景文件用于随机背景");
         // Fallback to gradient if directory is empty or read failed
     }
     // --- 背景图获取结束 ---
@@ -495,8 +526,8 @@ pub fn generate_svg_string(
         svg {{ background-color: {bg_color}; /* Fallback background color */ }}
         .card {{
             fill: {card_bg_color};
-            stroke: {card_stroke_color};
-            stroke-width: 1;
+            stroke: url(#normal-card-stroke-gradient);
+            stroke-width: 1.5;
             filter: url(#card-shadow);
             transition: all 0.3s ease;
         }}
@@ -513,11 +544,14 @@ pub fn generate_svg_string(
         .text-stat {{ font-size: 21px; fill: {text_color}; }}
         .text-time {{ font-size: 14px; fill: {text_secondary_color}; text-anchor: end; }}
         .text-footer {{ font-size: 13px; fill: {text_secondary_color}; }}
-        .text-songname {{ font-size: 19px; fill: {text_color}; /* font-weight: bold; */ }}
-        .text-score {{ font-size: 26px; fill: {text_color}; /* font-weight: bold; */ }}
-        .text-acc {{ font-size: 14px; fill: {text_secondary_color}; }}
-        .text-level {{ font-size: 14px; fill: {text_secondary_color}; }}
-        .text-rank {{ font-size: 14px; fill: {text_secondary_color}; text-anchor: end; }}
+        .text-songname {{ font-size: 20px; fill: {text_color}; font-weight: 600; }}
+        .text-score {{ font-size: 30px; fill: {text_color}; font-weight: 700; }}
+        .text-acc {{ font-size: 14px; fill: #999999; font-weight: 400; }}
+        .text-level {{ font-size: 14px; fill: #999999; font-weight: 400; }}
+        .text-rank {{ font-size: 14px; fill: #AAAAAA; font-weight: 400; text-anchor: end; }}
+        .text-difficulty-badge {{ font-size: 12px; font-weight: 700; }} /* 难度标签文本样式 */
+        .push-acc {{ fill: #4CAF50; font-weight: 600; }}
+        .text-rank-tag {{ font-size: 13px; fill: {text_secondary_color}; text-anchor: end; font-weight: 700; }}
         .text-section-title {{ font-size: 21px; fill: {text_color}; /* font-weight: bold; */ }}
         * {{ font-family: "{font_name}", "Microsoft YaHei", "SimHei", "DengXian", Arial, sans-serif; }}
         /* ]]> */
@@ -525,7 +559,6 @@ pub fn generate_svg_string(
         bg_color = bg_color,
         text_color = text_color,
         card_bg_color = card_bg_color,
-        card_stroke_color = card_stroke_color,
         text_secondary_color = text_secondary_color,
         fc_stroke_color = fc_stroke_color,
         ap_stroke_color = ap_stroke_color,
@@ -534,6 +567,12 @@ pub fn generate_svg_string(
     writeln!(svg, "</style>").map_err(fmt_err)?;
 
 
+    // Define normal card stroke gradient
+    writeln!(svg, r#"<linearGradient id="normal-card-stroke-gradient" x1="0%" y1="0%" x2="100%" y2="100%">"#).map_err(fmt_err)?;
+    writeln!(svg, "<stop offset=\"0%\" style=\"stop-color:#555868\" />").map_err(fmt_err)?; // 深灰色
+    writeln!(svg, "<stop offset=\"100%\" style=\"stop-color:#333848\" />").map_err(fmt_err)?; // 更深的灰色
+    writeln!(svg, r#"</linearGradient>"#).map_err(fmt_err)?;
+    
     // Define AP card stroke gradient ... (保持不变) ...
     writeln!(svg, r#"<linearGradient id="ap-gradient" x1="0%" y1="0%" x2="100%" y2="100%">"#).map_err(fmt_err)?;
     writeln!(svg, "<stop offset=\"0%\" style=\"stop-color:#FFDA63\" />").map_err(fmt_err)?;
