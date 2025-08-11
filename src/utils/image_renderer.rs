@@ -268,7 +268,7 @@ fn generate_card_svg(
 
     // 新增一个垂直偏移量，用于微调文本块的整体位置
     // 可以调整这个值，直到视觉效果满意为止。数值越大，文本越往下。
-    let vertical_text_offset = 4.0; 
+    let vertical_text_offset = 5.0; 
 
     // Calculate Y positions for text lines to align with cover
     let song_name_y = cover_y + text_line_height_song * 0.75 + vertical_text_offset;
@@ -384,6 +384,50 @@ if estimated_width > text_width {
     writeln!(svg, r#"<text x="{:.1}" y="{:.1}" class="text-difficulty-badge" text-anchor="middle" fill="white">{}</text>"#,
              badge_text_x, badge_text_y, difficulty_text).map_err(fmt_err)?;
 
+    // FC/AP标签尺寸
+    let fc_ap_badge_width = 30.0;
+    let fc_ap_badge_height = 20.0;
+    let fc_ap_badge_radius = 4.0;
+    let fc_ap_badge_spacing = 5.0; // 标签之间的间距
+
+    // FC标签位置（在难度标签右侧）
+    if score.is_fc {
+        let fc_badge_x = badge_x + badge_width + fc_ap_badge_spacing;
+        let fc_badge_y = badge_y;
+        
+        // 绘制FC标签背景
+        let fc_badge_color = "#4682B4";
+        writeln!(svg, r#"<rect x="{}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{:.1}" ry="{:.1}" fill="{}" />"#,
+                 fc_badge_x, fc_badge_y, fc_ap_badge_width, fc_ap_badge_height, fc_ap_badge_radius, fc_ap_badge_radius, fc_badge_color).map_err(fmt_err)?;
+        
+        // 绘制FC标签文本
+        let fc_badge_text_x = fc_badge_x + fc_ap_badge_width / 2.0;
+        let fc_badge_text_y = fc_badge_y + fc_ap_badge_height / 2.0 + 5.0; // 垂直居中
+        writeln!(svg, r#"<text x="{:.1}" y="{:.1}" class="text-fc-ap-badge" text-anchor="middle" fill="white">FC</text>"#,
+                 fc_badge_text_x, fc_badge_text_y).map_err(fmt_err)?;
+    }
+
+    // AP标签位置（在FC标签右侧或难度标签右侧）
+    if score.acc == 100.0 {
+        let ap_badge_x = if score.is_fc {
+            badge_x + badge_width + fc_ap_badge_spacing * 2.0 + fc_ap_badge_width
+        } else {
+            badge_x + badge_width + fc_ap_badge_spacing
+        };
+        let ap_badge_y = badge_y;
+        
+        // 绘制AP标签背景
+        let ap_badge_color = "gold";
+        writeln!(svg, r#"<rect x="{}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{:.1}" ry="{:.1}" fill="{}" />"#,
+                 ap_badge_x, ap_badge_y, fc_ap_badge_width, fc_ap_badge_height, fc_ap_badge_radius, fc_ap_badge_radius, ap_badge_color).map_err(fmt_err)?;
+        
+        // 绘制AP标签文本
+        let ap_badge_text_x = ap_badge_x + fc_ap_badge_width / 2.0;
+        let ap_badge_text_y = ap_badge_y + fc_ap_badge_height / 2.0 + 5.0; // 垂直居中
+        writeln!(svg, r#"<text x="{:.1}" y="{:.1}" class="text-fc-ap-badge" text-anchor="middle" fill="white" filter="url(#ap-text-shadow)">AP</text>"#,
+                 ap_badge_text_x, ap_badge_text_y).map_err(fmt_err)?;
+    }
+
     // 恢复等级和RKS的简单字符串拼接
     let level_text = format!("Lv.{} -> {:.2}", score.difficulty_value, score.rks);
     writeln!(svg, r#"<text x="{}" y="{:.1}" class="text-level">{}</text>"#, text_x, level_y, level_text).map_err(fmt_err)?;
@@ -445,8 +489,15 @@ pub fn generate_svg_string(
         crate::controllers::image::Theme::White => ("#FFFFFF", "#000000", "#F0F0F0", "#DDDDDD", "#666666", "#4682B4", "url(#ap-gradient)"),
         crate::controllers::image::Theme::Black => ("#141826", "#FFFFFF", "#1A1E2A", "#333848", "#BBBBBB", "#87CEEB", "url(#ap-gradient)"),
     };
+    let (ap_card_fill, fc_card_fill) = match theme {
+        crate::controllers::image::Theme::White => ("url(#ap-card-bg-gradient)".to_string(), "url(#fc-card-bg-gradient)".to_string()),
+        crate::controllers::image::Theme::Black => (card_bg_color.to_string(), card_bg_color.to_string()),
+    };
     
-    let mut normal_card_stroke_color = "url(#normal-card-stroke-gradient)".to_string();
+    let mut normal_card_stroke_color = match theme {
+        crate::controllers::image::Theme::White => "url(#normal-card-stroke-gradient)".to_string(),
+        crate::controllers::image::Theme::Black => "#252A38".to_string(), // Weaker border for black theme
+    };
     let mut svg = String::new();
     let fmt_err = |e| AppError::InternalError(format!("SVG formatting error: {}", e));
 
@@ -474,9 +525,11 @@ pub fn generate_svg_string(
         let mut rng = thread_rng();
         if let Some(random_path) = background_files.choose(&mut rng) { // 随机选择一个路径
             // --- 新增：计算背景主色的反色 ---
-            if let Some(inverse_color) = calculate_inverse_color_from_path(random_path) {
-                normal_card_stroke_color = inverse_color;
-                log::info!("使用背景反色作为卡片边框: {}", normal_card_stroke_color);
+            if let crate::controllers::image::Theme::White = theme {
+                if let Some(inverse_color) = calculate_inverse_color_from_path(random_path) {
+                    normal_card_stroke_color = inverse_color;
+                    log::info!("使用背景反色作为卡片边框: {}", normal_card_stroke_color);
+                }
             }
             // --- 结束新增 ---
 
@@ -526,6 +579,9 @@ pub fn generate_svg_string(
 
     writeln!(svg, r#"<filter id="ap-glow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="{}" flood-opacity="0.8" /></filter>"#, fc_stroke_color).map_err(fmt_err)?;
 
+    // AP Text Shadow Filter Definition
+    writeln!(svg, r#"<filter id="ap-text-shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="1" dy="1" stdDeviation="1" flood-color="rgba(0,0,0,0.5)"/></filter>"#).map_err(fmt_err)?;
+
     // Gaussian Blur Filter Definition
     writeln!(svg, r#"<filter id="bg-blur">"#).map_err(fmt_err)?;
     // 调整 stdDeviation 控制模糊程度, 10 是一个比较强的模糊效果
@@ -547,11 +603,13 @@ pub fn generate_svg_string(
             transition: all 0.3s ease;
         }}
         .card-ap {{
+          fill: {ap_card_fill};
           stroke: {ap_stroke_color};
           stroke-width: 2.5;
           filter: url(#ap-glow);
         }}
         .card-fc {{
+          fill: {fc_card_fill};
           stroke: {fc_stroke_color}; /* Light Sky Blue */
           stroke-width: 2.5;
           filter: url(#fc-glow);
@@ -568,6 +626,7 @@ pub fn generate_svg_string(
         .text-level {{ font-size: 14px; fill: #999999; font-weight: 400; }}
         .text-rank {{ font-size: 14px; fill: #AAAAAA; font-weight: 400; text-anchor: end; }}
         .text-difficulty-badge {{ font-size: 12px; font-weight: 700; }} /* 难度标签文本样式 */
+        .text-fc-ap-badge {{ font-size: 11px; font-weight: 700; }} /* FC/AP标签文本样式 */
         .push-acc {{ fill: #4CAF50; font-weight: 600; }}
         .text-rank-tag {{ font-size: 13px; fill: {text_secondary_color}; text-anchor: end; font-weight: 700; }}
         .text-section-title {{ font-size: 21px; fill: {text_color}; /* font-weight: bold; */ }}
@@ -581,6 +640,8 @@ pub fn generate_svg_string(
         normal_card_stroke_color = normal_card_stroke_color,
         fc_stroke_color = fc_stroke_color,
         ap_stroke_color = ap_stroke_color,
+        ap_card_fill = ap_card_fill,
+        fc_card_fill = fc_card_fill,
         font_name = MAIN_FONT_NAME
     ).map_err(fmt_err)?;
     writeln!(svg, "</style>").map_err(fmt_err)?;
@@ -603,6 +664,11 @@ pub fn generate_svg_string(
     writeln!(svg, "<stop offset=\"0%\" style=\"stop-color:#D4A017\" />").map_err(fmt_err)?; // 更暗的金色
     writeln!(svg, "<stop offset=\"100%\" style=\"stop-color:#B8860B\" />").map_err(fmt_err)?; // 更暗的金色
     writeln!(svg, r#"</linearGradient>"#).map_err(fmt_err)?;
+
+    // Define AP card background gradient for white theme
+    writeln!(svg, r#"<linearGradient id="ap-card-bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#FFF9E6;stop-opacity:0.8" /><stop offset="100%" style="stop-color:#FFEB99;stop-opacity:0.8" /></linearGradient>"#).map_err(fmt_err)?;
+    // Define FC card background gradient for white theme
+    writeln!(svg, r#"<linearGradient id="fc-card-bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#E6F2FF;stop-opacity:0.8" /><stop offset="100%" style="stop-color:#B3D9FF;stop-opacity:0.8" /></linearGradient>"#).map_err(fmt_err)?;
 
     writeln!(svg, "</defs>").map_err(fmt_err)?;
 
