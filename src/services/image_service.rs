@@ -191,6 +191,7 @@ impl ImageService {
                     (None, None)
                 };
 
+                let app_config = crate::utils::config::get_config()?;
                 let stats = PlayerStats {
                     ap_top_3_avg,
                     best_27_avg,
@@ -201,6 +202,7 @@ impl ImageService {
                     ap_top_3_scores,
                     challenge_rank,
                     data_string,
+                    custom_footer_text: Some(app_config.custom_footer_text),
                 };
                 
                 let theme_clone = theme.clone();

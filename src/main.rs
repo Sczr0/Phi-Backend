@@ -67,29 +67,26 @@ struct ApiDoc;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // 加载.env文件 (如果存在)
-    dotenv().ok();
-    
+    // 初始化配置
+    if let Err(e) = crate::utils::config::init_config() {
+        eprintln!("启动失败：无法加载配置: {}", e);
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()));
+    }
+    let app_config = crate::utils::config::get_config().unwrap(); // 在此之后可以安全地unwrap
+
     // 初始化日志
-    env_logger::init_from_env(Env::default().default_filter_or("info"));
-    
+    env_logger::init_from_env(Env::default().default_filter_or(&app_config.log_level));
+
     // --- 获取配置 ---
-    let database_url = env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "sqlite:phigros_bindings.db".to_string());
-    
-    let info_data_path = env::var("INFO_DATA_PATH")
-        .unwrap_or_else(|_| "info".to_string());
-    
+    let database_url = app_config.database_url.clone();
     let host = env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-    let port = env::var("PORT")
-        .unwrap_or_else(|_| "8080".to_string())
-        .parse::<u16>()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-    
+    let port = app_config.server_port;
+
     log::info!("应用配置:");
     log::info!("- 数据库URL: {}", database_url);
-    log::info!("- 数据文件路径: {}", info_data_path);
     log::info!("- 服务器地址: {}:{}", host, port);
+    log::info!("- 日志级别: {}", app_config.log_level);
+    log::info!("- 页脚文本: {}", app_config.custom_footer_text);
     
     if let Err(e) = cover_loader::ensure_covers_available() {
         log::error!("初始化曲绘资源失败: {:?}", e);
