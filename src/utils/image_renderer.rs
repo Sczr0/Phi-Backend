@@ -403,7 +403,7 @@ if estimated_width > text_width {
         // 绘制FC标签文本
         let fc_badge_text_x = fc_badge_x + fc_ap_badge_width / 2.0;
         let fc_badge_text_y = fc_badge_y + fc_ap_badge_height / 2.0 + 5.0; // 垂直居中
-        writeln!(svg, r#"<text x="{:.1}" y="{:.1}" class="text-fc-ap-badge" text-anchor="middle" fill="white">FC</text>"#,
+        writeln!(svg, r#"<text x="{:.1}" y="{:.1}" class="text-fc-ap-badge" text-anchor="middle" fill="white" filter="url(#ap-text-shadow)">FC</text>"#,
                  fc_badge_text_x, fc_badge_text_y).map_err(fmt_err)?;
     }
 
@@ -490,7 +490,7 @@ pub fn generate_svg_string(
         crate::controllers::image::Theme::Black => ("#141826", "#FFFFFF", "#1A1E2A", "#333848", "#BBBBBB", "#87CEEB", "url(#ap-gradient)"),
     };
     let (ap_card_fill, fc_card_fill) = match theme {
-        crate::controllers::image::Theme::White => ("url(#ap-card-bg-gradient)".to_string(), "url(#fc-card-bg-gradient)".to_string()),
+        crate::controllers::image::Theme::White => ("#FFFBEB".to_string(), "#E6F2FF".to_string()),
         crate::controllers::image::Theme::Black => (card_bg_color.to_string(), card_bg_color.to_string()),
     };
     
@@ -626,7 +626,7 @@ pub fn generate_svg_string(
         .text-level {{ font-size: 14px; fill: #999999; font-weight: 400; }}
         .text-rank {{ font-size: 14px; fill: #AAAAAA; font-weight: 400; text-anchor: end; }}
         .text-difficulty-badge {{ font-size: 12px; font-weight: 700; }} /* 难度标签文本样式 */
-        .text-fc-ap-badge {{ font-size: 11px; font-weight: 700; }} /* FC/AP标签文本样式 */
+        .text-fc-ap-badge {{ font-size: 11px; font-weight: 700; stroke: #222; stroke-width: 0.8px; paint-order: stroke; }} /* FC/AP标签文本样式 */
         .push-acc {{ fill: #4CAF50; font-weight: 600; }}
         .text-rank-tag {{ font-size: 13px; fill: {text_secondary_color}; text-anchor: end; font-weight: 700; }}
         .text-section-title {{ font-size: 21px; fill: {text_color}; /* font-weight: bold; */ }}
@@ -665,10 +665,7 @@ pub fn generate_svg_string(
     writeln!(svg, "<stop offset=\"100%\" style=\"stop-color:#B8860B\" />").map_err(fmt_err)?; // 更暗的金色
     writeln!(svg, r#"</linearGradient>"#).map_err(fmt_err)?;
 
-    // Define AP card background gradient for white theme
-    writeln!(svg, r#"<linearGradient id="ap-card-bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#FFF9E6;stop-opacity:0.8" /><stop offset="100%" style="stop-color:#FFEB99;stop-opacity:0.8" /></linearGradient>"#).map_err(fmt_err)?;
-    // Define FC card background gradient for white theme
-    writeln!(svg, r#"<linearGradient id="fc-card-bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#E6F2FF;stop-opacity:0.8" /><stop offset="100%" style="stop-color:#B3D9FF;stop-opacity:0.8" /></linearGradient>"#).map_err(fmt_err)?;
+    // Gradients for white theme are now solid colors.
 
     writeln!(svg, "</defs>").map_err(fmt_err)?;
 
