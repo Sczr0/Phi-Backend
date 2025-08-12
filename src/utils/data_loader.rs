@@ -118,7 +118,9 @@ struct PredictedConstantRecord {
 
 fn load_song_info(path: &Path) -> AppResult<Vec<SongInfo>> {
     log::debug!("正在加载歌曲信息，路径: {}", path.display());
-    let mut rdr = csv::Reader::from_path(path)?;
+    let mut rdr = csv::ReaderBuilder::new()
+        .flexible(true)
+        .from_path(path)?;
     let mut songs = Vec::new();
 
     for (index, result) in rdr.records().enumerate() {
