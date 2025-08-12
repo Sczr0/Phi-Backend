@@ -958,8 +958,8 @@ pub fn generate_song_svg_string(
     let illust_height = height as f64 - padding * 3.0 - player_info_height - 80.0; // 给标题、页脚和曲目名称留出空间
     let illust_width = illust_height * (2048.0 / 1080.0); // 保持2048x1080的比例
     
-    // 确保曲绘不会超过整体宽度的50%（调整曲绘比例，从60%改为50%）
-    let illust_width = (illust_width).min(width as f64 * 0.50);
+    // 确保曲绘不会超过整体宽度的60%
+    let illust_width = (illust_width).min(width as f64 * 0.60);
     
     // 曲目名称区域高度
     let song_name_height = 50.0;
@@ -1031,9 +1031,9 @@ pub fn generate_song_svg_string(
         .text-label {{ font-size: 28px; font-weight: bold; }} /* 增大难度标签字体 */
         .text-value {{ font-size: 18px; fill: #E0E0E0; }}
         .text-score {{ font-size: 34px; font-weight: bold; }} /* 增大分数字体 */
-        .text-acc {{ font-size: 22px; fill: #B0B0B0; }} /* 增大ACC字体并调整颜色 */
-        .text-rks {{ font-size: 22px; fill: #E0E0E0; }} /* 增大RKS字体 */
-        .text-push-acc {{ font-size: 20px; font-weight: bold; }} /* 增大推分ACC字体并加粗 */
+        .text-acc {{ font-size: 18px; fill: #B0B0B0; }} /* 参考Bn图调整ACC字体 */
+        .text-rks {{ font-size: 18px; fill: #E0E0E0; }} /* 参考Bn图调整RKS字体 */
+        .text-push-acc {{ font-size: 18px; font-weight: bold; }} /* 参考Bn图调整推分ACC字体 */
         .text-songname {{ font-size: 24px; font-weight: bold; fill: #FFFFFF; text-anchor: middle; }}
         .text-player-info {{ font-size: 22px; font-weight: bold; fill: #FFFFFF; }}
         .text-player-rks {{ font-size: 20px; fill: #E0E0E0; }}
@@ -1042,7 +1042,7 @@ pub fn generate_song_svg_string(
         .text-difficulty-in {{ fill: #FFB347; }}
         .text-difficulty-at {{ fill: #FF6961; }}
         .text-footer {{ font-size: 14px; fill: #888888; text-anchor: end; }}
-        .text-constants {{ font-size: 16px; fill: #CCCCCC; }}
+        .text-constants {{ font-size: 18px; fill: #AAAAAA; }}
         .player-info-card {{ fill: rgba(40, 45, 60, 0.8); stroke: rgba(100, 100, 100, 0.4); stroke-width: 1; }}
         .difficulty-card {{ fill: url(#card-gradient); stroke: rgba(120, 120, 120, 0.5); stroke-width: 1.5; }} /* 使用渐变填充 */
         .difficulty-card-inactive {{ fill: rgba(40, 45, 60, 0.5); stroke: rgba(70, 70, 70, 0.3); stroke-width: 1; }}
@@ -1098,35 +1098,47 @@ pub fn generate_song_svg_string(
     writeln!(svg, r#"<text x="{}" y="{}" class="text text-subtitle" text-anchor="end">{}</text>"#,
              width as f64 - padding - 20.0, player_info_y + 49.0, time_str).map_err(fmt_err)?;
 
-    // --- 曲绘（左侧）---
+    // --- 曲绘和曲目名称（左侧）---
     let illust_x = padding;
     let illust_y = player_info_y + player_info_height + padding; // 在玩家信息区域下方
     let illust_href = data.illustration_path.as_ref().and_then(|p| {
         p.canonicalize().ok().map(|canon_p| canon_p.to_string_lossy().into_owned())
     });
     
+    // 曲目名称位置
+    let song_name_x = illust_x;
+    let song_name_y = illust_y + illust_height + padding / 2.0;
+    let song_name_width = illust_width;
+    
+    // --- 方案: 使用 <g> 包裹并应用滤镜 ---
+    let _left_card_x = illust_x;
+    let _left_card_y = illust_y;
+    let _left_card_width = illust_width;
+    let _left_card_height = illust_height + padding / 2.0 + song_name_height;
+
+    // 开始一个组，并对组应用阴影
+    writeln!(svg, r#"<g filter="url(#illust-shadow)">"#).map_err(fmt_err)?;
+    
     // 曲绘裁剪路径（圆角矩形）
     let illust_clip_id = "illust-clip";
     writeln!(svg, "<defs><clipPath id=\"{}\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"10\" ry=\"10\" /></clipPath></defs>",
              illust_clip_id, illust_x, illust_y, illust_width, illust_height).map_err(fmt_err)?;
     
-    // 曲绘图片或占位矩形
+    // 曲绘图片或占位矩形（移除单独的阴影）
     if let Some(href) = illust_href {
-        writeln!(svg, r#"<image href="{}" x="{}" y="{}" width="{}" height="{}" clip-path="url(#{})" preserveAspectRatio="xMidYMid slice" filter="url(#illust-shadow)" />"#,
+        writeln!(svg, r#"<image href="{}" x="{}" y="{}" width="{}" height="{}" clip-path="url(#{})" preserveAspectRatio="xMidYMid slice" />"#,
                  escape_xml(&href), illust_x, illust_y, illust_width, illust_height, illust_clip_id).map_err(fmt_err)?;
     } else {
-        writeln!(svg, "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#333\" rx=\"10\" ry=\"10\" filter=\"url(#illust-shadow)\"/>",
+        writeln!(svg, "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#333\" rx=\"10\" ry=\"10\" />",
                  illust_x, illust_y, illust_width, illust_height).map_err(fmt_err)?;
     }
     
-    // --- 曲目名称（曲绘下方） ---
-    let song_name_x = illust_x;
-    let song_name_y = illust_y + illust_height + padding / 2.0;
-    let song_name_width = illust_width;
-    
-    // 曲目名称背景卡片
-    writeln!(svg, r#"<rect x="{}" y="{}" width="{}" height="{}" rx="8" ry="8" class="song-name-card" filter="url(#card-shadow)" />"#,
+    // 曲目名称背景卡片（移除单独的阴影）
+    writeln!(svg, r#"<rect x="{}" y="{}" width="{}" height="{}" rx="8" ry="8" class="song-name-card" />"#,
              song_name_x, song_name_y, song_name_width, song_name_height).map_err(fmt_err)?;
+    
+    // 结束组
+    writeln!(svg, "</g>").map_err(fmt_err)?;
     
     // 曲目名称文字（居中）
     writeln!(svg, r#"<text x="{}" y="{}" class="text text-songname">{}</text>"#,
@@ -1139,20 +1151,10 @@ pub fn generate_song_svg_string(
     let cards_start_x = illust_x + illust_width + padding;
     let cards_start_y = illust_y; // 与曲绘顶部对齐
     
-    // 收集所有定数值用于底部展示
-    let mut constants = Vec::new();
-    
     // 渲染四个难度卡片
     for (i, &diff_key) in difficulties.iter().enumerate() {
         let pos_x = cards_start_x;
         let pos_y = cards_start_y + (difficulty_card_height + difficulty_card_spacing) * i as f64;
-        
-        // 收集定数值
-        if let Some(Some(score_data)) = data.difficulty_scores.get(diff_key) {
-            if let Some(dv) = score_data.difficulty_value {
-                constants.push((diff_key, dv));
-            }
-        }
         
         // 检查是否有该难度的数据，决定卡片样式
         let has_difficulty_data = data.difficulty_scores.get(diff_key)
@@ -1188,10 +1190,23 @@ pub fn generate_song_svg_string(
         // 难度标签 - 垂直居中位置，仅显示在左侧
         let diff_label_class = format!("text text-label text-difficulty-{}", diff_key.to_lowercase());
         let label_x = pos_x + content_padding + 35.0;  // 左侧居中
-        let label_y = pos_y + difficulty_card_height / 2.0 + 10.0; // 垂直居中位置，+10是为了视觉上的微调
+        let label_y = pos_y + difficulty_card_height / 2.0; // 垂直居中位置
         
         writeln!(svg, r#"<text x="{}" y="{}" class="{}" text-anchor="middle">{}</text>"#,
                 label_x, label_y, diff_label_class, diff_key).map_err(fmt_err)?;
+
+        // --- START: 新增代码 ---
+        // 在难度标签下方显示定数值
+        if let Some(Some(score_data)) = data.difficulty_scores.get(diff_key) {
+            if let Some(dv) = score_data.difficulty_value {
+                let constant_text_x = label_x; // 与难度标签X轴对齐
+                // 调整Y坐标，让它位于难度标签下方
+                let constant_text_y = label_y + 20.0;
+                writeln!(svg, r#"<text x="{}" y="{}" class="text-constants" text-anchor="middle">Lv. {:.1}</text>"#,
+                         constant_text_x, constant_text_y, dv).map_err(fmt_err)?;
+            }
+        }
+        // --- END: 新增代码 ---
 
         // 判断是否有该难度的谱面数据
         let has_difficulty_chart = data.difficulty_scores.get(diff_key)
@@ -1206,72 +1221,50 @@ pub fn generate_song_svg_string(
             // 有成绩数据
             if score_data.acc.is_some() {
                 // 有ACC记录，显示完整成绩信息
-                
-                // 分数显示 - 在卡片上部左侧
                 let score_text = score_data.score.map_or("N/A".to_string(), |s| format!("{:.0}", s));
-                let score_x = right_area_start + 25.0;  // 靠左对齐，从20.0增加到25.0
-                let score_y = pos_y + difficulty_card_height * 0.35; // 上部位置，从0.4调整为0.35
-                
-                writeln!(svg, r#"<text x="{}" y="{}" class="text text-score" text-anchor="start">{}</text>"#,
-                         score_x, score_y, score_text).map_err(fmt_err)?;
-                
-                // RKS显示 - 跟分数同行，靠右
-                let rks_value = score_data.rks.unwrap_or(0.0);
-                let rks_text = format!("RKS: {:.2}", rks_value);
-                let rks_x = pos_x + difficulty_card_width - content_padding; // 靠右对齐
-                let rks_y = score_y; // 与分数在同一水平线
-                
-                // RKS使用渐变色
-                let rks_fill = if score_data.is_phi == Some(true) {
-                    "url(#rks-gradient-ap)"
-                } else {
-                    "url(#rks-gradient)"
-                };
-                
-                writeln!(svg, r#"<text x="{}" y="{}" class="text text-rks" text-anchor="end" fill="{}">{}</text>"#,
-                         rks_x, rks_y, rks_fill, rks_text).map_err(fmt_err)?;
-                      
-                // ACC显示 - 在下部位置，靠左
                 let acc_value = score_data.acc.unwrap_or(0.0);
-                let acc_text = format!("ACC: {:.2}%", acc_value);
-                let acc_x = right_area_start + 25.0; // 靠左对齐，从20.0增加到25.0
-                let acc_y = pos_y + difficulty_card_height * 0.65; // 在卡片下部，从0.7调整为0.65
-                
-                // 根据是否是AP决定填充颜色
-                let acc_fill = if score_data.is_phi == Some(true) { 
-                    "url(#rks-gradient-ap)" 
-                } else { 
-                    "#A0A0A0" 
-                };
-                
-                writeln!(svg, r#"<text x="{}" y="{}" class="text text-acc" text-anchor="start" fill="{}">{}</text>"#,
-                         acc_x, acc_y, acc_fill, acc_text).map_err(fmt_err)?;
+                let rks_value = score_data.rks.unwrap_or(0.0);
+                let dv_value = score_data.difficulty_value.unwrap_or(0.0);
 
-                // 推分ACC - 与ACC同行，靠右
+                // 左对齐
+                let text_x = right_area_start + 25.0;
+
+                // Y 坐标
+                let score_y = pos_y + 40.0;
+                let acc_y = pos_y + 65.0;
+                let rks_y = pos_y + 88.0;
+
+                // 分数
+                writeln!(svg, r#"<text x="{}" y="{}" class="text text-score" text-anchor="start">{}</text>"#,
+                         text_x, score_y, score_text).map_err(fmt_err)?;
+                
+                // ACC -> 推分
+                let mut acc_text = format!("Acc: {:.2}%", acc_value);
                 if let Some(push_acc) = score_data.player_push_acc {
-                    let push_acc_y = acc_y; // 与ACC在同一水平线
-                    let push_acc_x = rks_x; // 与RKS同样位置（右对齐）
-                    
-                    let push_acc_display = if push_acc >= 100.0 {
+                     let push_acc_display = if push_acc >= 100.0 {
                         if score_data.is_phi == Some(true) {
-                            format!("<tspan fill=\"gold\" font-weight=\"bold\">已 Phi</tspan>")
+                            format!("<tspan class='text-push-acc' fill='gold'> (已 Phi)</tspan>")
                         } else {
-                            format!("<tspan fill=\"gold\" font-weight=\"bold\">-> 100.00%</tspan>")
+                            format!("<tspan class='text-push-acc' fill='gold'> -> 100.00%</tspan>")
                         }
                     } else {
-                        format!(r#"<tspan fill="url(#rks-gradient-push)" font-weight="bold">→ {:.2}%</tspan>"#, push_acc)
+                        format!(r#"<tspan class='text-push-acc' fill='url(#rks-gradient-push)'> -> {:.2}%</tspan>"#, push_acc)
                     };
-                    
-                    writeln!(svg, r#"<text x="{}" y="{}" class="text text-push-acc" text-anchor="end">{}</text>"#,
-                             push_acc_x, push_acc_y, push_acc_display).map_err(fmt_err)?;
+                    acc_text.push_str(&push_acc_display);
                 }
+                writeln!(svg, r#"<text x="{}" y="{}" class="text text-acc" text-anchor="start">{}</text>"#,
+                         text_x, acc_y, acc_text).map_err(fmt_err)?;
 
-                // 不再显示FC/Phi文字标记，改用边框显示
+                // Lv. -> RKS
+                let rks_text = format!("Lv.{:.1} -> {:.2}", dv_value, rks_value);
+                 writeln!(svg, r#"<text x="{}" y="{}" class="text text-rks" text-anchor="start">{}</text>"#,
+                         text_x, rks_y, rks_text).map_err(fmt_err)?;
+
             } else if has_difficulty_chart {
                 // 有难度定数但无成绩，显示"无成绩"
                 let no_data_x = right_area_center;
                 let no_data_y = pos_y + difficulty_card_height / 2.0 + 5.0; // 垂直居中
-                writeln!(svg, r#"<text x="{}" y="{}" class="text text-acc" text-anchor="middle" dominant-baseline="middle">无成绩</text>"#, 
+                writeln!(svg, r#"<text x="{}" y="{}" class="text text-acc" text-anchor="middle" dominant-baseline="middle">无成绩</text>"#,
                          no_data_x, no_data_y).map_err(fmt_err)?;
             }
         } else {
@@ -1281,45 +1274,6 @@ pub fn generate_song_svg_string(
             writeln!(svg, r#"<text x="{}" y="{}" class="text text-acc" text-anchor="middle" dominant-baseline="middle">无谱面</text>"#, 
                      no_data_x, no_data_y).map_err(fmt_err)?;
         }
-    }
-    
-    // --- 难度定数展示区域 ---
-    let constants_x = cards_start_x;
-    let constants_y = song_name_y; // 与歌曲名框顶部对齐
-    let constants_width = difficulty_card_width;
-    let constants_height = song_name_height; // 使用相同高度
-
-    // 背景卡片
-    writeln!(svg, r#"<rect x="{}" y="{}" width="{}" height="{}" rx="8" ry="8" class="constants-card" filter="url(#card-shadow)" />"#,
-             constants_x, constants_y, constants_width, constants_height).map_err(fmt_err)?;
-    
-    // 显示定数文本
-    if !constants.is_empty() {
-        let text_y = constants_y + constants_height / 2.0 + 6.0; // 垂直居中，+6是微调
-        
-        // 计算文本位置，平均分布
-        let segment_width = constants_width / constants.len() as f64;
-        
-        for (i, (diff_key, constant)) in constants.iter().enumerate() {
-            let text_x = constants_x + segment_width * (i as f64 + 0.5);
-            let diff_color = match *diff_key {
-                "EZ" => "#77DD77",
-                "HD" => "#87CEEB",
-                "IN" => "#FFB347",
-                "AT" => "#FF6961",
-                _ => "#FFFFFF"
-            };
-            
-            writeln!(svg, r#"<text x="{}" y="{}" class="text text-constants" text-anchor="middle"><tspan fill="{}">{}</tspan> {:.1}</text>"#,
-                     text_x, text_y, diff_color, diff_key, constant).map_err(fmt_err)?;
-        }
-    } else {
-        // 如果没有定数数据，也调整垂直位置
-        let text_x = constants_x + constants_width / 2.0;
-        let text_y = constants_y + constants_height / 2.0 + 6.0; // 垂直居中，+6是微调
-        
-        writeln!(svg, r#"<text x="{}" y="{}" class="text text-constants" text-anchor="middle">无定数数据</text>"#,
-                 text_x, text_y).map_err(fmt_err)?;
     }
 
     // --- Footer ---
