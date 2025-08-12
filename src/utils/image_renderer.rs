@@ -947,9 +947,9 @@ pub fn generate_song_svg_string(
     let fmt_err = |e| AppError::InternalError(format!("SVG formatting error: {}", e));
 
     // --- 整体布局与尺寸（横版）---
-    let width = 1200; // 图片宽度
-    let height = 720; // 图片高度增加，解决底部重叠问题
-    let padding = 30.0;
+    let width = 1400; // 图片宽度，从1200增加到1400
+    let height = 800; // 图片高度，从720增加到800
+    let padding = 40.0; // 内边距，从30.0增加到40.0
     
     // 玩家信息区域高度
     let player_info_height = 78.0; // 原来是70.0，增加8px (上下各4px)
@@ -958,8 +958,8 @@ pub fn generate_song_svg_string(
     let illust_height = height as f64 - padding * 3.0 - player_info_height - 80.0; // 给标题、页脚和曲目名称留出空间
     let illust_width = illust_height * (2048.0 / 1080.0); // 保持2048x1080的比例
     
-    // 确保曲绘不会超过整体宽度的55%（拉宽曲绘，原来是50%）
-    let illust_width = (illust_width).min(width as f64 * 0.60);
+    // 确保曲绘不会超过整体宽度的50%（调整曲绘比例，从60%改为50%）
+    let illust_width = (illust_width).min(width as f64 * 0.50);
     
     // 曲目名称区域高度
     let song_name_height = 50.0;
@@ -970,9 +970,9 @@ pub fn generate_song_svg_string(
     let card_area_width = width as f64 - illust_width - padding * 3.0;
     let difficulty_card_width = card_area_width;
     // 总共4张卡片，高度加上3个间距等于曲绘高度
-    let difficulty_spacing_total = padding * 0.6 * 3.0; // 3个间距
+    let difficulty_spacing_total = padding * 0.8 * 3.0; // 3个间距，增加间距
     let difficulty_card_height = (illust_height - difficulty_spacing_total) / 4.0; // 每张卡片高度
-    let difficulty_card_spacing = padding * 0.6; // 卡片间距略微调整
+    let difficulty_card_spacing = padding * 0.8; // 卡片间距增加，从0.6调整为0.8
 
     let mut svg = String::new();
 
@@ -1030,10 +1030,10 @@ pub fn generate_song_svg_string(
         .text-subtitle {{ font-size: 18px; fill: #B0B0B0; }}
         .text-label {{ font-size: 28px; font-weight: bold; }} /* 增大难度标签字体 */
         .text-value {{ font-size: 18px; fill: #E0E0E0; }}
-        .text-score {{ font-size: 32px; font-weight: bold; }}
-        .text-acc {{ font-size: 20px; fill: #A0A0A0; }} /* 增大ACC字体 */
-        .text-rks {{ font-size: 20px; fill: #E0E0E0; }} /* 新增单独的RKS样式 */
-        .text-push-acc {{ font-size: 18px; }}
+        .text-score {{ font-size: 34px; font-weight: bold; }} /* 增大分数字体 */
+        .text-acc {{ font-size: 22px; fill: #B0B0B0; }} /* 增大ACC字体并调整颜色 */
+        .text-rks {{ font-size: 22px; fill: #E0E0E0; }} /* 增大RKS字体 */
+        .text-push-acc {{ font-size: 20px; font-weight: bold; }} /* 增大推分ACC字体并加粗 */
         .text-songname {{ font-size: 24px; font-weight: bold; fill: #FFFFFF; text-anchor: middle; }}
         .text-player-info {{ font-size: 22px; font-weight: bold; fill: #FFFFFF; }}
         .text-player-rks {{ font-size: 20px; fill: #E0E0E0; }}
@@ -1044,10 +1044,10 @@ pub fn generate_song_svg_string(
         .text-footer {{ font-size: 14px; fill: #888888; text-anchor: end; }}
         .text-constants {{ font-size: 16px; fill: #CCCCCC; }}
         .player-info-card {{ fill: rgba(40, 45, 60, 0.8); stroke: rgba(100, 100, 100, 0.4); stroke-width: 1; }}
-        .difficulty-card {{ fill: rgba(40, 45, 60, 0.8); stroke: rgba(100, 100, 100, 0.4); stroke-width: 1; }}
+        .difficulty-card {{ fill: url(#card-gradient); stroke: rgba(120, 120, 120, 0.5); stroke-width: 1.5; }} /* 使用渐变填充 */
         .difficulty-card-inactive {{ fill: rgba(40, 45, 60, 0.5); stroke: rgba(70, 70, 70, 0.3); stroke-width: 1; }}
-        .difficulty-card-fc {{ fill: rgba(40, 45, 60, 0.8); stroke: #ADD8E6; stroke-width: 3; }} /* FC蓝色边框 */
-        .difficulty-card-phi {{ fill: rgba(40, 45, 60, 0.8); stroke: gold; stroke-width: 3; }} /* AP/Phi金色边框 */
+        .difficulty-card-fc {{ fill: url(#card-gradient); stroke: #87CEEB; stroke-width: 3; }} /* FC卡片使用渐变填充 */
+        .difficulty-card-phi {{ fill: url(#card-gradient); stroke: gold; stroke-width: 3; }} /* Phi卡片使用渐变填充 */
         .song-name-card {{ fill: rgba(40, 45, 60, 0.8); stroke: rgba(100, 100, 100, 0.4); stroke-width: 1; }}
         .constants-card {{ fill: rgba(40, 45, 60, 0.8); stroke: rgba(100, 100, 100, 0.4); stroke-width: 1; }}
         .rank-phi {{ fill: gold; }}
@@ -1060,7 +1060,11 @@ pub fn generate_song_svg_string(
     writeln!(svg, r#"<linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#141826" /><stop offset="100%" style="stop-color:#252E48" /></linearGradient>"#).map_err(fmt_err)?;
     writeln!(svg, r#"<filter id="card-shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="rgba(0,0,0,0.25)" flood-opacity="0.25" /></filter>"#).map_err(fmt_err)?;
     writeln!(svg, r#"<filter id="bg-blur"><feGaussianBlur stdDeviation="10" /></filter>"#).map_err(fmt_err)?;
+    // 添加曲绘阴影效果
+    writeln!(svg, r#"<filter id="illust-shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="rgba(0,0,0,0.3)" flood-opacity="0.3" /></filter>"#).map_err(fmt_err)?;
     writeln!(svg, r#"<linearGradient id="rks-gradient" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#FDC830" /><stop offset="100%" style="stop-color:#F37335" /></linearGradient>"#).map_err(fmt_err)?;
+    // 添加卡片渐变效果
+    writeln!(svg, r#"<linearGradient id="card-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#2D3241" /><stop offset="100%" style="stop-color:#1E2330" /></linearGradient>"#).map_err(fmt_err)?;
     writeln!(svg, r#"<linearGradient id="rks-gradient-ap" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#f6d365" /><stop offset="100%" style="stop-color:#fda085" /></linearGradient>"#).map_err(fmt_err)?;
     writeln!(svg, r#"<linearGradient id="rks-gradient-push" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#a8e063" /><stop offset="100%" style="stop-color:#56ab2f" /></linearGradient>"#).map_err(fmt_err)?;
     writeln!(svg, "</defs>").map_err(fmt_err)?;
@@ -1108,10 +1112,10 @@ pub fn generate_song_svg_string(
     
     // 曲绘图片或占位矩形
     if let Some(href) = illust_href {
-        writeln!(svg, r#"<image href="{}" x="{}" y="{}" width="{}" height="{}" clip-path="url(#{})" preserveAspectRatio="xMidYMid slice" />"#,
+        writeln!(svg, r#"<image href="{}" x="{}" y="{}" width="{}" height="{}" clip-path="url(#{})" preserveAspectRatio="xMidYMid slice" filter="url(#illust-shadow)" />"#,
                  escape_xml(&href), illust_x, illust_y, illust_width, illust_height, illust_clip_id).map_err(fmt_err)?;
     } else {
-        writeln!(svg, "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#333\" rx=\"10\" ry=\"10\"/>",
+        writeln!(svg, "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#333\" rx=\"10\" ry=\"10\" filter=\"url(#illust-shadow)\"/>",
                  illust_x, illust_y, illust_width, illust_height).map_err(fmt_err)?;
     }
     
@@ -1176,10 +1180,10 @@ pub fn generate_song_svg_string(
                  pos_x, pos_y, difficulty_card_width, difficulty_card_height, card_class).map_err(fmt_err)?;
 
         // 卡片内容边距
-        let content_padding = 20.0;
+        let content_padding = 25.0; // 从20.0增加到25.0
         
         // 计算卡片中央分隔线 - 将卡片分为左右两部分
-        let card_middle = pos_x + content_padding + 70.0; // 难度标签占用左侧区域，宽度为70px
+        let card_middle = pos_x + content_padding + 80.0; // 难度标签占用左侧区域，宽度从70px增加到80px
         
         // 难度标签 - 垂直居中位置，仅显示在左侧
         let diff_label_class = format!("text text-label text-difficulty-{}", diff_key.to_lowercase());
@@ -1205,8 +1209,8 @@ pub fn generate_song_svg_string(
                 
                 // 分数显示 - 在卡片上部左侧
                 let score_text = score_data.score.map_or("N/A".to_string(), |s| format!("{:.0}", s));
-                let score_x = right_area_start + 20.0;  // 靠左对齐
-                let score_y = pos_y + difficulty_card_height * 0.4; // 上部位置
+                let score_x = right_area_start + 25.0;  // 靠左对齐，从20.0增加到25.0
+                let score_y = pos_y + difficulty_card_height * 0.35; // 上部位置，从0.4调整为0.35
                 
                 writeln!(svg, r#"<text x="{}" y="{}" class="text text-score" text-anchor="start">{}</text>"#,
                          score_x, score_y, score_text).map_err(fmt_err)?;
@@ -1218,20 +1222,20 @@ pub fn generate_song_svg_string(
                 let rks_y = score_y; // 与分数在同一水平线
                 
                 // RKS使用渐变色
-                let rks_fill = if score_data.is_phi == Some(true) { 
-                    "url(#rks-gradient-ap)" 
-                } else { 
-                    "url(#rks-gradient)" 
+                let rks_fill = if score_data.is_phi == Some(true) {
+                    "url(#rks-gradient-ap)"
+                } else {
+                    "url(#rks-gradient)"
                 };
                 
                 writeln!(svg, r#"<text x="{}" y="{}" class="text text-rks" text-anchor="end" fill="{}">{}</text>"#,
                          rks_x, rks_y, rks_fill, rks_text).map_err(fmt_err)?;
-                     
+                      
                 // ACC显示 - 在下部位置，靠左
                 let acc_value = score_data.acc.unwrap_or(0.0);
                 let acc_text = format!("ACC: {:.2}%", acc_value);
-                let acc_x = right_area_start + 20.0; // 靠左对齐
-                let acc_y = pos_y + difficulty_card_height * 0.7; // 在卡片下部
+                let acc_x = right_area_start + 25.0; // 靠左对齐，从20.0增加到25.0
+                let acc_y = pos_y + difficulty_card_height * 0.65; // 在卡片下部，从0.7调整为0.65
                 
                 // 根据是否是AP决定填充颜色
                 let acc_fill = if score_data.is_phi == Some(true) { 
@@ -1250,12 +1254,12 @@ pub fn generate_song_svg_string(
                     
                     let push_acc_display = if push_acc >= 100.0 {
                         if score_data.is_phi == Some(true) {
-                            format!("<tspan fill=\"gold\">已 Phi</tspan>")
+                            format!("<tspan fill=\"gold\" font-weight=\"bold\">已 Phi</tspan>")
                         } else {
-                            format!("<tspan fill=\"gold\">-> 100.00%</tspan>")
+                            format!("<tspan fill=\"gold\" font-weight=\"bold\">-> 100.00%</tspan>")
                         }
                     } else {
-                        format!(r#"<tspan fill="url(#rks-gradient-push)">→ {:.2}%</tspan>"#, push_acc)
+                        format!(r#"<tspan fill="url(#rks-gradient-push)" font-weight="bold">→ {:.2}%</tspan>"#, push_acc)
                     };
                     
                     writeln!(svg, r#"<text x="{}" y="{}" class="text text-push-acc" text-anchor="end">{}</text>"#,
