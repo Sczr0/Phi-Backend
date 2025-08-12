@@ -121,9 +121,63 @@ fn load_song_info(path: &Path) -> AppResult<Vec<SongInfo>> {
     let mut rdr = csv::Reader::from_path(path)?;
     let mut songs = Vec::new();
 
-    for result in rdr.deserialize() {
-        let record: SongInfo = result?;
-        songs.push(record);
+    for (index, result) in rdr.records().enumerate() {
+        let line_num = index + 2; // CSV 行号从1开始，加上标题行
+        let record = result?;
+
+        // 检查字段数量，正常应该是8个字段
+        if record.len() < 8 {
+            log::error!("解析 info.csv 第 {} 行失败: 字段数量不足，至少需要8个字段，实际有 {} 个", line_num, record.len());
+            continue;
+        }
+
+        // 处理 Lyrith迷宮リリス.ユメミド 这首有9个字段的歌曲
+        let id = record.get(0).unwrap_or("").to_string();
+        let song = record.get(1).unwrap_or("").to_string();
+        let composer = record.get(2).unwrap_or("").to_string();
+        let illustrator = if !record.get(3).unwrap_or("").is_empty() {
+            Some(record.get(3).unwrap().to_string())
+        } else {
+            None
+        };
+        let ez_charter = if !record.get(4).unwrap_or("").is_empty() {
+            Some(record.get(4).unwrap().to_string())
+        } else {
+            None
+        };
+        let hd_charter = if !record.get(5).unwrap_or("").is_empty() {
+            Some(record.get(5).unwrap().to_string())
+        } else {
+            None
+        };
+        let in_charter = if !record.get(6).unwrap_or("").is_empty() {
+            Some(record.get(6).unwrap().to_string())
+        } else {
+            None
+        };
+        let at_charter = if !record.get(7).unwrap_or("").is_empty() {
+            Some(record.get(7).unwrap().to_string())
+        } else {
+            None
+        };
+
+        // 如果有额外的字段（比如 Lyrith迷宮リリス.ユメミd 的第9个字段），记录警告但忽略
+        if record.len() > 8 {
+            log::warn!("歌曲 '{}' (ID: '{}') 有 {} 个字段，超出了预期的8个字段，多余字段将被忽略", song, id, record.len());
+        }
+
+        let song_info = SongInfo {
+            id,
+            song,
+            composer,
+            illustrator,
+            ez_charter,
+            hd_charter,
+            in_charter,
+            at_charter,
+        };
+
+        songs.push(song_info);
     }
 
     log::debug!("歌曲信息加载完成，共 {} 条", songs.len());
