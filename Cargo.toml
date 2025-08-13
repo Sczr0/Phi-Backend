@@ -39,7 +39,6 @@ flate2 = "1.0.28"
 
 # 异步
 tokio = { version = "1", features = ["full"] }
-# futures = "0.3"
 
 # 工具库
 lazy_static = "1.4.0"
@@ -55,30 +54,25 @@ sqlx = { version = "0.7.4", features = [ "runtime-tokio", "tls-rustls", "sqlite"
 
 # Added from the code block
 chrono = { version = "0.4", features = ["serde"] }
+cron = "0.12"
 rand = { version = "0.8", features = ["small_rng"] }
 uuid = { version = "1.4", features = ["v4", "serde"] }
 
 # 图像处理 (基础库仍需要)
 image = { version = "0.24", features = ["png", "jpeg"] }
-# urlencoding = "2.1"
-# url = "2.3"
 
 # Git 操作
 git2 = "0.18"
 
 # SVG 渲染
 resvg = "0.41"
-# itertools = "0.14.0"
 percent-encoding = "2.3.1"
-# tiny-skia = "0.11"
-# usvg = "0.37"
 
 # 并行计算
 rayon = "1.10.0"
 
 # 缓存
 moka = { version = "0.12", features = ["future"] }
-askama = "0.12"
 lru = "0.12"
 
 # API文档
@@ -92,5 +86,6 @@ default = []
 [profile.release]
 debug = true
 
+# cargo-machete 的配置。如果没有任何需要忽略的依赖，此部分可以完全删除。
 [package.metadata.cargo-machete]
-ignored = ["md-5"]
+ignored = []

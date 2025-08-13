@@ -50,6 +50,18 @@
     
     # 数据文件路径 (可选，默认使用项目根目录下的info文件夹)
     # INFO_DATA_PATH=info
+    
+    # --- 维护模式配置 (可选) ---
+    # 手动开启维护模式 (true/false)
+    # MAINTENANCE_MODE=false
+    # 维护时返回的自定义信息
+    # MAINTENANCE_MESSAGE="服务器正在维护中，请稍后再试。"
+    # 基于时间的维护窗口 (使用 RFC3339 格式, UTC 时区)
+    # MAINTENANCE_START_TIME="2025-08-15T02:00:00Z"
+    # MAINTENANCE_END_TIME="2025-08-15T04:00:00Z"
+    # 基于 Cron 表达式的维护 (UTC 时区, 格式: 秒 分 时 日 月 周)
+    # 例如，每天凌晨 2:00 (UTC) 开始的维护窗口
+    # MAINTENANCE_CRON="0 0 2 * * *"
     ```
     
     **注意**: `.env` 文件用于本地开发环境，不应提交到Git仓库。
@@ -69,6 +81,23 @@
 ## API接口
 
 所有接口均使用JSON格式进行数据交换。
+
+### 服务状态
+
+-   **`GET /status`**
+    -   描述: 检查后端服务的健康状况。可用于监控、负载均衡和容器健康检查。
+    -   成功响应 (`200 OK`):
+        ```json
+        {
+            "status": "ok"
+        }
+        ```
+    -   维护中响应 (`503 Service Unavailable`):
+        ```json
+        {
+            "message": "服务器正在维护中，请稍后再试。"
+        }
+        ```
 
 **通用请求体:**
 
@@ -268,7 +297,7 @@
     -   失败响应: `400 Bad Request`, `401 Unauthorized`, `404 Not Found`, `409 Conflict`。
 
 -   **`GET /song/search/predictions`**
-    -   描述: 查询歌曲的预测常数信息。
+    -   描述: 查询歌曲的预测常数信息。（待废弃）
     -   查询参数:
         -   `q` (必需) - 搜索关键词
         -   `difficulty` (可选) - 指定难度，如不提供则返回所有难度。

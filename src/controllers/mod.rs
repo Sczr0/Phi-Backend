@@ -5,3 +5,5 @@ pub mod image;
 pub mod rks;
 pub mod save;
 pub mod song;
+
+pub mod status;

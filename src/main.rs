@@ -42,7 +42,8 @@ use crate::models::user::ApiResponse;
         controllers::song::get_song_record,
         controllers::image::generate_bn_image,
         controllers::image::generate_song_image,
-        controllers::image::get_rks_leaderboard
+        controllers::image::get_rks_leaderboard,
+        controllers::status::get_status
     ),
     components(
         schemas(
@@ -54,7 +55,9 @@ use crate::models::user::ApiResponse;
             models::save::GameSave,
             models::song::SongInfo,
             models::predictions::PredictionResponse,
-            ApiResponse<serde_json::Value>
+            ApiResponse<serde_json::Value>,
+            controllers::status::StatusResponse,
+            controllers::status::MaintenanceResponse
         )
     ),
     tags(

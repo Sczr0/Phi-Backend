@@ -16,6 +16,11 @@ pub struct AppConfig {
     pub leancloud_app_key: String,
     pub leancloud_client_id: String,
     pub leancloud_base_url: String,
+    pub maintenance_mode: bool,
+    pub maintenance_message: String,
+    pub maintenance_start_time: Option<String>,
+    pub maintenance_end_time: Option<String>,
+    pub maintenance_cron: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -35,6 +40,14 @@ impl Default for AppConfig {
             leancloud_app_key: env::var("LEANCLOUD_APP_KEY").unwrap_or_else(|_| "Qr9AEqtuoSVS3zeD6iVbM4ZC0AtkJcQ89tywVyi0".to_string()),
             leancloud_client_id: env::var("LEANCLOUD_CLIENT_ID").unwrap_or_else(|_| "rAK3FfdieFob2Nn8Am".to_string()),
             leancloud_base_url: env::var("LEANCLOUD_BASE_URL").unwrap_or_else(|_| "https://rak3ffdi.cloud.tds1.tapapis.cn/1.1".to_string()),
+            maintenance_mode: env::var("MAINTENANCE_MODE")
+                .unwrap_or_else(|_| "false".to_string())
+                .parse()
+                .unwrap_or(false),
+            maintenance_message: env::var("MAINTENANCE_MESSAGE").unwrap_or_else(|_| "Server is under maintenance.".to_string()),
+            maintenance_start_time: env::var("MAINTENANCE_START_TIME").ok(),
+            maintenance_end_time: env::var("MAINTENANCE_END_TIME").ok(),
+            maintenance_cron: env::var("MAINTENANCE_CRON").ok(),
         }
     }
 }
