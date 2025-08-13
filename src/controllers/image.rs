@@ -1,26 +1,22 @@
-use actix_web::{post, get, web, HttpResponse, Result};
+use actix_web::{get, post, web, HttpResponse, Result};
 use serde::Deserialize;
-use utoipa::{ToSchema, IntoParams};
+use utoipa::{IntoParams, ToSchema};
 
 use crate::models::user::IdentifierRequest;
-use crate::services::image_service::{ImageService};
+use crate::services::image_service::ImageService;
 use crate::services::phigros::PhigrosService;
-use crate::services::user::UserService;
-use crate::services::song::SongService;
 use crate::services::player_archive_service::PlayerArchiveService;
+use crate::services::song::SongService;
+use crate::services::user::UserService;
 use crate::utils::error::AppError;
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum Theme {
+    #[default]
     Black,
     White,
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Theme::Black
-    }
 }
 
 #[derive(Deserialize, Debug, ToSchema, IntoParams)]
@@ -67,19 +63,21 @@ pub async fn generate_bn_image(
     image_service: web::Data<ImageService>,
 ) -> Result<HttpResponse, AppError> {
     let n = path.into_inner();
-    
+
     if n == 0 {
         return Err(AppError::BadRequest("N must be greater than 0".to_string()));
     }
-    
-    let image_bytes = image_service.generate_bn_image(
-        n,
-        req,
-        &query.theme,
-        phigros_service,
-        user_service,
-        player_archive_service
-    ).await?;
+
+    let image_bytes = image_service
+        .generate_bn_image(
+            n,
+            req,
+            &query.theme,
+            phigros_service,
+            user_service,
+            player_archive_service,
+        )
+        .await?;
 
     Ok(HttpResponse::Ok()
         .content_type("image/png")
@@ -110,15 +108,16 @@ pub async fn generate_song_image(
 ) -> Result<HttpResponse, AppError> {
     let song_query = query.into_inner().q;
 
-    let image_bytes = image_service.generate_song_image(
-        song_query,
-        req,
-        phigros_service,
-        user_service,
-        song_service,
-        player_archive_service
-    )
-    .await?;
+    let image_bytes = image_service
+        .generate_song_image(
+            song_query,
+            req,
+            phigros_service,
+            user_service,
+            song_service,
+            player_archive_service,
+        )
+        .await?;
 
     Ok(HttpResponse::Ok()
         .content_type("image/png")
@@ -142,13 +141,9 @@ pub async fn get_rks_leaderboard(
     player_archive_service: web::Data<PlayerArchiveService>,
     image_service: web::Data<ImageService>,
 ) -> Result<HttpResponse, AppError> {
-    let result = image_service.generate_rks_leaderboard_image(
-        query.limit,
-        player_archive_service,
-    )
-    .await?;
+    let result = image_service
+        .generate_rks_leaderboard_image(query.limit, player_archive_service)
+        .await?;
 
-    Ok(HttpResponse::Ok()
-        .content_type("image/png")
-        .body(result))
+    Ok(HttpResponse::Ok().content_type("image/png").body(result))
 }

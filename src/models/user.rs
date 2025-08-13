@@ -1,6 +1,6 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use chrono::{DateTime, Utc};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -39,7 +39,12 @@ pub struct PlatformBinding {
 }
 
 impl PlatformBinding {
-    pub fn new(internal_id: String, platform: String, platform_id: String, session_token: String) -> Self {
+    pub fn new(
+        internal_id: String,
+        platform: String,
+        platform_id: String,
+        session_token: String,
+    ) -> Self {
         Self {
             id: None,
             internal_id,

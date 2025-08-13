@@ -31,7 +31,7 @@ pub async fn get_cloud_saves(
 ) -> AppResult<HttpResponse> {
     let token = resolve_token(&req, &user_service).await?;
     check_session_token(&token)?;
-    
+
     let (save_result, profile_result) = tokio::join!(
         phigros_service.get_save(&token),
         phigros_service.get_profile(&token)
@@ -42,26 +42,32 @@ pub async fn get_cloud_saves(
     let player_nickname = match profile_result {
         Ok(profile) => Some(profile.nickname),
         Err(e) => {
-            log::warn!("获取用户 Profile 失败 (get_cloud_saves): {}, 将不在响应中包含昵称", e);
+            log::warn!("获取用户 Profile 失败 (get_cloud_saves): {e}, 将不在响应中包含昵称");
             None
         }
     };
-    
+
     let mut simplified_game_record = serde_json::Map::new();
     if let Some(game_record_map) = &save_data.game_record {
         for (song_id, difficulties) in game_record_map {
             let mut simplified_difficulties = serde_json::Map::new();
             for (diff_name, record) in difficulties {
-                simplified_difficulties.insert(diff_name.clone(), json!({
-                    "score": record.score,
-                    "acc": record.acc,
-                    "fc": record.fc
-                }));
+                simplified_difficulties.insert(
+                    diff_name.clone(),
+                    json!({
+                        "score": record.score,
+                        "acc": record.acc,
+                        "fc": record.fc
+                    }),
+                );
             }
-            simplified_game_record.insert(song_id.clone(), serde_json::Value::Object(simplified_difficulties));
+            simplified_game_record.insert(
+                song_id.clone(),
+                serde_json::Value::Object(simplified_difficulties),
+            );
         }
     }
-    
+
     let mut response_data = json!({
         "game_key": save_data.game_key,
         "game_progress": save_data.game_progress,
@@ -102,11 +108,11 @@ pub async fn get_cloud_saves_with_difficulty(
     user_service: web::Data<UserService>,
 ) -> AppResult<HttpResponse> {
     debug!("接收到获取带难度定数的云存档请求");
-    
+
     let token = resolve_token(&req, &user_service).await?;
-    
+
     let save = phigros_service.get_save_with_difficulty(&token).await?;
-    
+
     Ok(HttpResponse::Ok().json(ApiResponse {
         code: 200,
         status: "OK".to_string(),
@@ -133,12 +139,12 @@ pub async fn get_cloud_save_info(
     user_service: web::Data<UserService>,
 ) -> AppResult<HttpResponse> {
     debug!("接收到获取原始云存档元数据 (saveInfo) 的请求");
-    
+
     let token = resolve_token(&req, &user_service).await?;
     check_session_token(&token)?;
-    
+
     let save_info = phigros_service.get_cloud_save_info(&token).await?;
-    
+
     Ok(HttpResponse::Ok().json(ApiResponse {
         code: 200,
         status: "OK".to_string(),

@@ -1,13 +1,13 @@
 use lazy_static::lazy_static;
+use serde::Deserialize;
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::env;
-use serde::Deserialize;
 
-use crate::models::song::{SongDifficulty, SongInfo, NicknameMap};
 use crate::models::predictions::PredictedConstants;
+use crate::models::song::{NicknameMap, SongDifficulty, SongInfo};
 use crate::utils::error::AppResult;
 
 // --- 辅助函数：从环境变量获取路径，如果未设置则使用默认值 ---
@@ -19,20 +19,15 @@ fn get_data_path(env_var: &str, default_value: &str) -> PathBuf {
 
 lazy_static! {
     static ref INFO_DATA_PATH_BUF: PathBuf = get_data_path("INFO_DATA_PATH", "info");
-    
-    static ref INFO_FILE_PATH: PathBuf = INFO_DATA_PATH_BUF.join(
-        env::var("INFO_FILE").unwrap_or_else(|_| "info.csv".to_string())
-    );
-    static ref DIFFICULTY_FILE_PATH: PathBuf = INFO_DATA_PATH_BUF.join(
-        env::var("DIFFICULTY_FILE").unwrap_or_else(|_| "difficulty.csv".to_string())
-    );
-    static ref NICKLIST_FILE_PATH: PathBuf = INFO_DATA_PATH_BUF.join(
-        env::var("NICKLIST_FILE").unwrap_or_else(|_| "nicklist.yaml".to_string())
-    );
+    static ref INFO_FILE_PATH: PathBuf =
+        INFO_DATA_PATH_BUF.join(env::var("INFO_FILE").unwrap_or_else(|_| "info.csv".to_string()));
+    static ref DIFFICULTY_FILE_PATH: PathBuf = INFO_DATA_PATH_BUF
+        .join(env::var("DIFFICULTY_FILE").unwrap_or_else(|_| "difficulty.csv".to_string()));
+    static ref NICKLIST_FILE_PATH: PathBuf = INFO_DATA_PATH_BUF
+        .join(env::var("NICKLIST_FILE").unwrap_or_else(|_| "nicklist.yaml".to_string()));
     static ref PREDICTIONS_FILE_PATH: PathBuf = INFO_DATA_PATH_BUF.join(
         env::var("PREDICTIONS_FILE").unwrap_or_else(|_| "chart_predictions_wide.csv".to_string())
     );
-
     pub static ref SONG_INFO: Arc<Vec<SongInfo>> = Arc::new({
         match load_song_info(&INFO_FILE_PATH) {
             Ok(info) => {
@@ -40,7 +35,7 @@ lazy_static! {
                 info
             }
             Err(e) => {
-                log::error!("加载歌曲信息失败: {}", e);
+                log::error!("加载歌曲信息失败: {e}");
                 Vec::new()
             }
         }
@@ -52,7 +47,7 @@ lazy_static! {
                 difficulty
             }
             Err(e) => {
-                log::error!("加载歌曲难度信息失败: {}", e);
+                log::error!("加载歌曲难度信息失败: {e}");
                 Vec::new()
             }
         }
@@ -64,7 +59,7 @@ lazy_static! {
                 nicknames
             }
             Err(e) => {
-                log::error!("加载歌曲别名信息失败: {}", e);
+                log::error!("加载歌曲别名信息失败: {e}");
                 HashMap::new()
             }
         }
@@ -100,7 +95,7 @@ lazy_static! {
                 predictions
             }
             Err(e) => {
-                log::error!("加载预测常数数据失败: {}", e);
+                log::error!("加载预测常数数据失败: {e}");
                 HashMap::new()
             }
         }
@@ -118,9 +113,7 @@ struct PredictedConstantRecord {
 
 fn load_song_info(path: &Path) -> AppResult<Vec<SongInfo>> {
     log::debug!("正在加载歌曲信息，路径: {}", path.display());
-    let mut rdr = csv::ReaderBuilder::new()
-        .flexible(true)
-        .from_path(path)?;
+    let mut rdr = csv::ReaderBuilder::new().flexible(true).from_path(path)?;
     let mut songs = Vec::new();
 
     for (index, result) in rdr.records().enumerate() {
@@ -129,7 +122,11 @@ fn load_song_info(path: &Path) -> AppResult<Vec<SongInfo>> {
 
         // 检查字段数量，正常应该是8个字段
         if record.len() < 8 {
-            log::error!("解析 info.csv 第 {} 行失败: 字段数量不足，至少需要8个字段，实际有 {} 个", line_num, record.len());
+            log::error!(
+                "解析 info.csv 第 {} 行失败: 字段数量不足，至少需要8个字段，实际有 {} 个",
+                line_num,
+                record.len()
+            );
             continue;
         }
 
@@ -165,7 +162,12 @@ fn load_song_info(path: &Path) -> AppResult<Vec<SongInfo>> {
 
         // 如果有额外的字段（比如 Lyrith迷宮リリス.ユメミd 的第9个字段），记录警告但忽略
         if record.len() > 8 {
-            log::warn!("歌曲 '{}' (ID: '{}') 有 {} 个字段，超出了预期的8个字段，多余字段将被忽略", song, id, record.len());
+            log::warn!(
+                "歌曲 '{}' (ID: '{}') 有 {} 个字段，超出了预期的8个字段，多余字段将被忽略",
+                song,
+                id,
+                record.len()
+            );
         }
 
         let song_info = SongInfo {
@@ -193,14 +195,14 @@ fn load_song_difficulty(path: &Path) -> AppResult<Vec<SongDifficulty>> {
 
     for (index, result) in rdr.deserialize().enumerate() {
         let line_num = index + 2;
-        log::trace!("处理 difficulty.csv 第 {} 行...", line_num);
+        log::trace!("处理 difficulty.csv 第 {line_num} 行...");
         match result {
             Ok(record) => {
-                log::trace!("成功解析第 {} 行: {:?}", line_num, record);
+                log::trace!("成功解析第 {line_num} 行: {record:?}");
                 difficulties.push(record);
             }
             Err(e) => {
-                log::error!("解析 difficulty.csv 第 {} 行失败: {}", line_num, e);
+                log::error!("解析 difficulty.csv 第 {line_num} 行失败: {e}");
             }
         }
     }
@@ -219,15 +221,15 @@ fn load_song_nicknames(path: &Path) -> AppResult<NicknameMap> {
 
 fn load_predicted_constants(path: &Path) -> AppResult<HashMap<String, PredictedConstants>> {
     log::debug!("正在加载预测常数数据，路径: {}", path.display());
-    
+
     if !path.exists() {
         log::warn!("预测常数文件不存在: {}", path.display());
         return Ok(HashMap::new());
     }
-    
+
     let mut rdr = csv::Reader::from_path(path)?;
     let mut predictions = HashMap::new();
-    
+
     for (index, result) in rdr.deserialize().enumerate() {
         let line_num = index + 2;
         match result {
@@ -242,11 +244,11 @@ fn load_predicted_constants(path: &Path) -> AppResult<HashMap<String, PredictedC
                 predictions.insert(prediction_record.song_id, constants);
             }
             Err(e) => {
-                log::error!("解析预测常数数据第 {} 行失败: {}", line_num, e);
+                log::error!("解析预测常数数据第 {line_num} 行失败: {e}");
             }
         }
     }
-    
+
     log::debug!("预测常数数据加载完成，共 {} 条", predictions.len());
     Ok(predictions)
 }
@@ -254,7 +256,7 @@ fn load_predicted_constants(path: &Path) -> AppResult<HashMap<String, PredictedC
 pub fn get_song_name_by_id(id: &str) -> Option<String> {
     let result = SONG_ID_TO_NAME.get(id).cloned();
     if result.is_none() {
-        log::debug!("未找到歌曲 ID '{}'对应的名称", id);
+        log::debug!("未找到歌曲 ID '{id}'对应的名称");
     }
     result
 }
@@ -283,27 +285,29 @@ pub fn get_difficulty_by_id(id: &str, difficulty_level: &str) -> Option<f64> {
         "AT" => d.at,
         "Legacy" => None,
         _ => {
-            log::warn!("未知的难度级别: {} (歌曲ID: {})", difficulty_level, id);
+            log::warn!("未知的难度级别: {difficulty_level} (歌曲ID: {id})");
             None
-        },
+        }
     });
-    
+
     if result.is_none() && difficulty_level != "Legacy" {
-        log::debug!("未找到歌曲 '{}' 难度 '{}' 的定数映射", id, difficulty_level);
+        log::debug!("未找到歌曲 '{id}' 难度 '{difficulty_level}' 的定数映射");
     }
-    
+
     result
 }
 
 pub fn get_predicted_constant(id: &str, difficulty_level: &str) -> Option<f32> {
-    PREDICTED_CONSTANTS.get(id).and_then(|p| match difficulty_level {
-        "EZ" => p.ez,
-        "HD" => p.hd,
-        "IN" => p.inl,
-        "AT" => p.at,
-        _ => {
-            log::warn!("获取预测常数时遇到未知的难度级别: {} (歌曲ID: {})", difficulty_level, id);
-            None
-        }
-    })
+    PREDICTED_CONSTANTS
+        .get(id)
+        .and_then(|p| match difficulty_level {
+            "EZ" => p.ez,
+            "HD" => p.hd,
+            "IN" => p.inl,
+            "AT" => p.at,
+            _ => {
+                log::warn!("获取预测常数时遇到未知的难度级别: {difficulty_level} (歌曲ID: {id})");
+                None
+            }
+        })
 }

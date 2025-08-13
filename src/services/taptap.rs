@@ -1,11 +1,11 @@
+use crate::services::leancloud::LeanCloudService;
 use anyhow::Result;
-use base64::prelude::{BASE64_STANDARD, Engine as _};
+use base64::prelude::{Engine as _, BASE64_STANDARD};
 use hmac::Mac;
 use rand::{RngCore, SeedableRng};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::services::leancloud::LeanCloudService;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TapTapQrCodeResponse {
@@ -41,13 +41,19 @@ struct Account {
 }
 
 fn mac(token: &TapTapToken) -> String {
-    let ts: u64 = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let ts: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     let nonce: u32 = rand::rngs::SmallRng::seed_from_u64(ts).next_u32();
-    let input: String = format!("{}\n{}\nGET\n/account/basic-info/v1?client_id=rAK3FfdieFob2Nn8Am\nopen.tapapis.cn\n443\n\n", ts, nonce);
+    let input: String = format!("{ts}\n{nonce}\nGET\n/account/basic-info/v1?client_id=rAK3FfdieFob2Nn8Am\nopen.tapapis.cn\n443\n\n");
     let mut mac = hmac::Hmac::<sha1::Sha1>::new_from_slice(token.mac_key.as_bytes()).unwrap();
     mac.update(input.as_bytes());
     let mac_string: String = BASE64_STANDARD.encode(mac.finalize().into_bytes());
-    format!("MAC id=\"{}\",ts=\"{}\",nonce=\"{}\",mac=\"{}\"", token.kid, ts, nonce, mac_string)
+    format!(
+        "MAC id=\"{}\",ts=\"{}\",nonce=\"{}\",mac=\"{}\"",
+        token.kid, ts, nonce, mac_string
+    )
 }
 
 pub struct TapTapService {
@@ -88,20 +94,33 @@ impl TapTapService {
         }
 
         let token: TapTapToken = serde_json::from_value(response.data)?;
-        let account: Account = self.client.get("https://open.tapapis.cn/account/basic-info/v1?client_id=rAK3FfdieFob2Nn8Am")
+        let account: Account = self
+            .client
+            .get("https://open.tapapis.cn/account/basic-info/v1?client_id=rAK3FfdieFob2Nn8Am")
             .header("User-Agent", "TapTapAndroidSDK/3.16.5")
             .header("Authorization", mac(&token))
-            .send().await?.json::<Wrap<Account>>().await?.data;
+            .send()
+            .await?
+            .json::<Wrap<Account>>()
+            .await?
+            .data;
 
-        self.leancloud_service.login_with_taptap(&token, &account.openid, &account.unionid).await
+        self.leancloud_service
+            .login_with_taptap(&token, &account.openid, &account.unionid)
+            .await
     }
 
     #[allow(dead_code)]
     pub async fn get_profile(&self, authorization: &str) -> Result<String> {
-        let response = self.client.get("https://open.tapapis.cn/account/basic-info/v1?client_id=rAK3FfdieFob2Nn8Am")
+        let response = self
+            .client
+            .get("https://open.tapapis.cn/account/basic-info/v1?client_id=rAK3FfdieFob2Nn8Am")
             .header("User-Agent", "TapTapAndroidSDK/3.16.5")
             .header("Authorization", authorization)
-            .send().await?.text().await?;
+            .send()
+            .await?
+            .text()
+            .await?;
         Ok(response)
     }
 }

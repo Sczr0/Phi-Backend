@@ -1,7 +1,7 @@
 use actix_cors::Cors;
 use actix_web::{middleware, web, App, HttpServer};
 use env_logger::Env;
-use sqlx::sqlite::{SqlitePoolOptions, SqliteConnectOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::env;
 use std::str::FromStr;
 use utoipa::OpenApi;
@@ -14,13 +14,13 @@ mod routes;
 mod services;
 mod utils;
 
+use crate::models::user::ApiResponse;
+use services::image_service::ImageService;
 use services::phigros::PhigrosService;
+use services::player_archive_service::PlayerArchiveService;
 use services::song::SongService;
 use services::user::UserService;
-use services::player_archive_service::PlayerArchiveService;
-use services::image_service::ImageService;
 use utils::cover_loader;
-use crate::models::user::ApiResponse;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -66,13 +66,12 @@ use crate::models::user::ApiResponse;
 )]
 struct ApiDoc;
 
-
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     // 初始化配置
     if let Err(e) = crate::utils::config::init_config() {
-        eprintln!("启动失败：无法加载配置: {}", e);
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()));
+        eprintln!("启动失败：无法加载配置: {e}");
+        return Err(std::io::Error::other(e.to_string()));
     }
     let app_config = crate::utils::config::get_config().unwrap(); // 在此之后可以安全地unwrap
 
@@ -85,22 +84,22 @@ async fn main() -> std::io::Result<()> {
     let port = app_config.server_port;
 
     log::info!("应用配置:");
-    log::info!("- 数据库URL: {}", database_url);
-    log::info!("- 服务器地址: {}:{}", host, port);
+    log::info!("- 数据库URL: {database_url}");
+    log::info!("- 服务器地址: {host}:{port}");
     log::info!("- 日志级别: {}", app_config.log_level);
     log::info!("- 页脚文本: {}", app_config.custom_footer_text);
-    
+
     if let Err(e) = cover_loader::ensure_covers_available() {
-        log::error!("初始化曲绘资源失败: {:?}", e);
+        log::error!("初始化曲绘资源失败: {e:?}");
     } else {
         log::info!("曲绘资源检查/准备完成.");
     }
-    
-    log::info!("正在连接数据库: {}", database_url);
-    
+
+    log::info!("正在连接数据库: {database_url}");
+
     let connect_options = SqliteConnectOptions::from_str(&database_url)
         .map_err(|e| {
-            log::error!("数据库URL格式无效: {}", e);
+            log::error!("数据库URL格式无效: {e}");
             std::io::Error::new(std::io::ErrorKind::InvalidInput, e)
         })?
         .create_if_missing(true);
@@ -110,8 +109,8 @@ async fn main() -> std::io::Result<()> {
         .connect_with(connect_options)
         .await
         .map_err(|e| {
-            log::error!("无法创建数据库连接池: {}", e);
-            std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to create database connection pool: {}", e))
+            log::error!("无法创建数据库连接池: {e}");
+            std::io::Error::other(format!("Failed to create database connection pool: {e}"))
         })?;
 
     log::info!("正在运行数据库迁移...");
@@ -119,8 +118,8 @@ async fn main() -> std::io::Result<()> {
         .run(&pool)
         .await
         .map_err(|e| {
-            log::error!("数据库迁移失败: {}", e);
-            std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to run database migrations: {}", e))
+            log::error!("数据库迁移失败: {e}");
+            std::io::Error::other(format!("Failed to run database migrations: {e}"))
         })?;
     log::info!("数据库迁移完成");
 
@@ -131,8 +130,8 @@ async fn main() -> std::io::Result<()> {
     };
     let player_archive_service = PlayerArchiveService::new(pool.clone(), Some(archive_config));
 
-    log::info!("正在启动服务器 http://{}:{}", host, port);
-    log::info!("API 文档位于 http://{}:{}/swagger-ui/", host, port);
+    log::info!("正在启动服务器 http://{host}:{port}");
+    log::info!("API 文档位于 http://{host}:{port}/swagger-ui/");
 
     HttpServer::new(move || {
         let cors = Cors::default()
@@ -158,8 +157,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::Logger::default())
             .wrap(cors)
             .service(
-                SwaggerUi::new("/swagger-ui/{_:.*}")
-                    .url("/api-docs/openapi.json", openapi.clone()),
+                SwaggerUi::new("/swagger-ui/{_:.*}").url("/api-docs/openapi.json", openapi.clone()),
             )
             .configure(routes::configure)
     })

@@ -36,10 +36,9 @@ pub async fn get_status() -> impl Responder {
     }
 
     // 2. 检查时间窗口维护模式
-    if let (Some(start_str), Some(end_str)) = (
-        &CONFIG.maintenance_start_time,
-        &CONFIG.maintenance_end_time,
-    ) {
+    if let (Some(start_str), Some(end_str)) =
+        (&CONFIG.maintenance_start_time, &CONFIG.maintenance_end_time)
+    {
         if let (Ok(start_time), Ok(end_time)) = (
             DateTime::parse_from_rfc3339(start_str).map(|dt| dt.with_timezone(&Utc)),
             DateTime::parse_from_rfc3339(end_str).map(|dt| dt.with_timezone(&Utc)),

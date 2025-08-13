@@ -17,7 +17,7 @@ pub struct B30Record {
 // B30计算结果
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct B30Result {
-    pub overall_rks: f64,       // 最终计算出的 RKS
-    pub top_27: Vec<B30Record>, // RKS最高的27个谱面记录
+    pub overall_rks: f64,         // 最终计算出的 RKS
+    pub top_27: Vec<B30Record>,   // RKS最高的27个谱面记录
     pub top_3_ap: Vec<B30Record>, // RKS最高的3个AP谱面记录
 }

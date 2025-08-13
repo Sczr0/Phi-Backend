@@ -1,12 +1,12 @@
 use actix_web::{post, web, HttpResponse};
-use std::collections::HashMap;
 use log::debug;
+use std::collections::HashMap;
 use utoipa;
 
 use crate::models::user::{ApiResponse, IdentifierRequest};
 use crate::services::phigros::PhigrosService;
-use crate::services::user::UserService;
 use crate::services::player_archive_service::PlayerArchiveService;
+use crate::services::user::UserService;
 use crate::utils::error::AppResult;
 use crate::utils::save_parser::check_session_token;
 use crate::utils::token_helper::resolve_token;
@@ -32,7 +32,7 @@ pub async fn get_rks(
 ) -> AppResult<HttpResponse> {
     let token = resolve_token(&req, &user_service).await?;
     check_session_token(&token)?;
-    
+
     let (rks_save_res, profile_res) = tokio::join!(
         phigros_service.get_rks(&token),
         phigros_service.get_profile(&token)
@@ -40,7 +40,9 @@ pub async fn get_rks(
 
     let (rks_result, save) = rks_save_res?;
 
-    let player_id = save.user.as_ref()
+    let player_id = save
+        .user
+        .as_ref()
         .and_then(|u| u.get("objectId"))
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
@@ -48,7 +50,7 @@ pub async fn get_rks(
     let player_name = match profile_res {
         Ok(profile) => profile.nickname,
         Err(e) => {
-            log::warn!("获取用户 Profile 失败 (get_rks): {}, 将使用 Player ID 作为名称", e);
+            log::warn!("获取用户 Profile 失败 (get_rks): {e}, 将使用 Player ID 作为名称");
             player_id.clone()
         }
     };
@@ -58,7 +60,7 @@ pub async fn get_rks(
         for (song_id, difficulties) in game_record_map {
             for (diff_name, record) in difficulties {
                 if let Some(true) = record.fc {
-                    let key = format!("{}-{}", song_id, diff_name);
+                    let key = format!("{song_id}-{diff_name}");
                     fc_map.insert(key, true);
                 }
             }
@@ -72,15 +74,15 @@ pub async fn get_rks(
     let fc_map_clone = fc_map.clone();
 
     tokio::spawn(async move {
-        log::info!("[后台任务] (get_rks) 开始为玩家 {} ({}) 更新数据库存档...", player_name_clone, player_id_clone);
+        log::info!("[后台任务] (get_rks) 开始为玩家 {player_name_clone} ({player_id_clone}) 更新数据库存档...");
         match archive_service_clone.update_player_scores_from_rks_records(
             &player_id_clone,
             &player_name_clone,
             &records_clone,
             &fc_map_clone
         ).await {
-            Ok(_) => log::info!("[后台任务] (get_rks) 玩家 {} ({}) 数据库存档更新完成。", player_name_clone, player_id_clone),
-            Err(e) => log::error!("[后台任务] (get_rks) 更新玩家 {} ({}) 数据库存档失败: {}", player_name_clone, player_id_clone, e),
+            Ok(_) => log::info!("[后台任务] (get_rks) 玩家 {player_name_clone} ({player_id_clone}) 数据库存档更新完成。"),
+            Err(e) => log::error!("[后台任务] (get_rks) 更新玩家 {player_name_clone} ({player_id_clone}) 数据库存档失败: {e}"),
         }
     });
 
@@ -88,9 +90,9 @@ pub async fn get_rks(
         code: 200,
         status: "ok".to_string(),
         message: None,
-        data: Some(rks_result), 
+        data: Some(rks_result),
     }))
-} 
+}
 
 /// 获取玩家最好的N项成绩
 ///
@@ -115,8 +117,8 @@ pub async fn get_bn(
     user_service: web::Data<UserService>,
 ) -> AppResult<HttpResponse> {
     let n = n.into_inner();
-    debug!("接收到B{}查询请求", n);
-    
+    debug!("接收到B{n}查询请求");
+
     if n == 0 {
         return Ok(HttpResponse::Ok().json(ApiResponse {
             code: 400,
@@ -125,13 +127,17 @@ pub async fn get_bn(
             data: None::<Vec<()>>,
         }));
     }
-    
+
     let token = resolve_token(&req, &user_service).await?;
-    
+
     let (rks_result, _) = phigros_service.get_rks(&token).await?;
-    
-    let bn = rks_result.records.into_iter().take(n as usize).collect::<Vec<_>>();
-    
+
+    let bn = rks_result
+        .records
+        .into_iter()
+        .take(n as usize)
+        .collect::<Vec<_>>();
+
     Ok(HttpResponse::Ok().json(ApiResponse {
         code: 200,
         status: "OK".to_string(),

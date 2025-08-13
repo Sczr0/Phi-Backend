@@ -57,7 +57,10 @@ impl PartialOrd for RksRecord {
 
 impl Ord for RksRecord {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.rks.partial_cmp(&other.rks).unwrap_or(Ordering::Equal).reverse()
+        self.rks
+            .partial_cmp(&other.rks)
+            .unwrap_or(Ordering::Equal)
+            .reverse()
     }
 }
 
@@ -70,7 +73,7 @@ impl RksResult {
     pub fn new(records: Vec<RksRecord>) -> Self {
         let mut all_records = records.clone();
         all_records.sort_by(|a, b| b.rks.partial_cmp(&a.rks).unwrap_or(Ordering::Equal));
-        
+
         Self {
             records: all_records,
         }

@@ -1,10 +1,10 @@
-pub mod phigros;
-pub mod song;
-pub mod user;
 pub mod image_service;
-pub mod player_archive_service;
-pub mod taptap;
 pub mod leancloud;
+pub mod phigros;
+pub mod player_archive_service;
+pub mod song;
+pub mod taptap;
+pub mod user;
 
 // pub use phigros::PhigrosService; // Unused export
 // pub use song::SongService; // Unused export

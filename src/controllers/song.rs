@@ -2,15 +2,19 @@ use actix_web::{get, post, web, HttpResponse};
 use log::debug;
 use serde::Deserialize;
 use std::collections::HashMap;
-use utoipa::{ToSchema, IntoParams};
+use utoipa::{IntoParams, ToSchema};
 
-use crate::models::{user::{ApiResponse, IdentifierRequest}, song::SongInfo, predictions::PredictionResponse};
+use crate::models::{
+    predictions::PredictionResponse,
+    song::SongInfo,
+    user::{ApiResponse, IdentifierRequest},
+};
 use crate::services::phigros::PhigrosService;
 use crate::services::song::SongService;
 use crate::services::user::UserService;
-use crate::utils::error::{AppResult, AppError};
-use crate::utils::token_helper::resolve_token;
 use crate::utils::data_loader::get_predicted_constant;
+use crate::utils::error::{AppError, AppResult};
+use crate::utils::token_helper::resolve_token;
 
 #[derive(Deserialize, Debug, IntoParams)]
 #[allow(dead_code)]
@@ -37,14 +41,14 @@ pub async fn search_song(
     query: web::Query<HashMap<String, String>>,
     song_service: web::Data<SongService>,
 ) -> AppResult<HttpResponse> {
-    let q = query.get("q").ok_or_else(|| {
-        crate::utils::error::AppError::BadRequest("缺少查询参数q".to_string())
-    })?;
-    
-    debug!("接收到歌曲搜索请求: q={}", q);
-    
+    let q = query
+        .get("q")
+        .ok_or_else(|| crate::utils::error::AppError::BadRequest("缺少查询参数q".to_string()))?;
+
+    debug!("接收到歌曲搜索请求: q={q}");
+
     let song_info = song_service.search_song(q)?;
-    
+
     Ok(HttpResponse::Ok().json(ApiResponse {
         code: 200,
         status: "OK".to_string(),
@@ -73,16 +77,18 @@ pub async fn search_song_record(
     song_service: web::Data<SongService>,
     user_service: web::Data<UserService>,
 ) -> AppResult<HttpResponse> {
-    let q = query.get("q").ok_or_else(|| {
-        crate::utils::error::AppError::BadRequest("缺少查询参数q".to_string())
-    })?;
+    let q = query
+        .get("q")
+        .ok_or_else(|| crate::utils::error::AppError::BadRequest("缺少查询参数q".to_string()))?;
     let difficulty = query.get("difficulty").map(|s| s.as_str());
-    debug!("接收到歌曲记录搜索请求: q={}, difficulty={:?}", q, difficulty);
-    
+    debug!("接收到歌曲记录搜索请求: q={q}, difficulty={difficulty:?}");
+
     let song_id = song_service.get_song_id(q)?;
     let token = resolve_token(&req, &user_service).await?;
-    let song_records = phigros_service.get_song_record(&token, &song_id, difficulty).await?;
-    
+    let song_records = phigros_service
+        .get_song_record(&token, &song_id, difficulty)
+        .await?;
+
     Ok(HttpResponse::Ok().json(ApiResponse {
         code: 200,
         status: "OK".to_string(),
@@ -114,7 +120,7 @@ pub async fn get_song_info(
     query: web::Query<SongInfoQuery>,
     song_service: web::Data<SongService>,
 ) -> AppResult<HttpResponse> {
-    debug!("接收到旧版歌曲信息请求: {:?}", query);
+    debug!("接收到旧版歌曲信息请求: {query:?}");
 
     let song_info: SongInfo = if let Some(id) = &query.song_id {
         song_service.get_song_by_id(id)?
@@ -123,7 +129,9 @@ pub async fn get_song_info(
     } else if let Some(nick) = &query.nickname {
         song_service.search_song_by_nickname(nick)?
     } else {
-        return Err(AppError::BadRequest("必须提供 song_id, song_name 或 nickname 中的至少一个参数".to_string()));
+        return Err(AppError::BadRequest(
+            "必须提供 song_id, song_name 或 nickname 中的至少一个参数".to_string(),
+        ));
     };
 
     Ok(HttpResponse::Ok().json(ApiResponse {
@@ -160,7 +168,7 @@ pub async fn get_song_record(
     song_service: web::Data<SongService>,
     user_service: web::Data<UserService>,
 ) -> AppResult<HttpResponse> {
-    debug!("接收到旧版歌曲记录请求: {:?}", query);
+    debug!("接收到旧版歌曲记录请求: {query:?}");
 
     let song_id: String = if let Some(id) = &query.song_id {
         id.clone()
@@ -169,12 +177,16 @@ pub async fn get_song_record(
     } else if let Some(nick) = &query.nickname {
         song_service.get_song_id_by_nickname(nick)?
     } else {
-        return Err(AppError::BadRequest("必须提供 song_id, song_name 或 nickname 中的至少一个参数".to_string()));
+        return Err(AppError::BadRequest(
+            "必须提供 song_id, song_name 或 nickname 中的至少一个参数".to_string(),
+        ));
     };
 
     let difficulty = query.difficulty.as_deref();
     let token = resolve_token(&req, &user_service).await?;
-    let song_records = phigros_service.get_song_record(&token, &song_id, difficulty).await?;
+    let song_records = phigros_service
+        .get_song_record(&token, &song_id, difficulty)
+        .await?;
 
     Ok(HttpResponse::Ok().json(ApiResponse {
         code: 200,
@@ -198,14 +210,14 @@ pub async fn search_song_predictions(
     query: web::Query<HashMap<String, String>>,
     song_service: web::Data<SongService>,
 ) -> AppResult<HttpResponse> {
-    let q = query.get("q").ok_or_else(|| {
-        crate::utils::error::AppError::BadRequest("缺少查询参数q".to_string())
-    })?;
+    let q = query
+        .get("q")
+        .ok_or_else(|| crate::utils::error::AppError::BadRequest("缺少查询参数q".to_string()))?;
     let difficulty = query.get("difficulty").map(|s| s.as_str());
-    debug!("接收到歌曲预测常数搜索请求: q={}, difficulty={:?}", q, difficulty);
-    
+    debug!("接收到歌曲预测常数搜索请求: q={q}, difficulty={difficulty:?}");
+
     let song_id = song_service.get_song_id(q)?;
-    
+
     let result = match difficulty {
         Some(diff) => {
             let predicted_constant = get_predicted_constant(&song_id, diff);
@@ -214,7 +226,7 @@ pub async fn search_song_predictions(
                 difficulty: diff.to_string(),
                 predicted_constant,
             }]
-        },
+        }
         None => {
             let difficulties = vec!["EZ", "HD", "IN", "AT"];
             let mut results = Vec::new();
@@ -229,7 +241,7 @@ pub async fn search_song_predictions(
             results
         }
     };
-    
+
     Ok(HttpResponse::Ok().json(ApiResponse {
         code: 200,
         status: "OK".to_string(),
