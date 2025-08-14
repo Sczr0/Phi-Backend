@@ -209,8 +209,7 @@ impl<'a> BinaryReader<'a> {
 
             let mut difficulties = HashMap::new();
 
-            for level_index in 0..diff_list.len() {
-                let diff_name = diff_list[level_index];
+            for (level_index, &diff_name) in diff_list.iter().enumerate() {
                 if ((unlock >> level_index) & 1) != 0 {
                     log::trace!("GameRecord: 歌曲 '{song_id}', 难度 '{diff_name}' (index {level_index}) 存在记录");
                     let score = self.read_int_aligned()?;

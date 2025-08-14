@@ -13,95 +13,96 @@ impl SongService {
     }
 
     // 统一搜索函数：自动判断输入是ID、歌曲名还是别名
-    pub fn search_song(&self, query: &str) -> AppResult<SongInfo> {
-        if query.is_empty() {
+    pub fn search_song(&self, initial_query: &str) -> AppResult<SongInfo> {
+        if initial_query.is_empty() {
             return Err(AppError::SongNotFound("输入为空".to_string()));
         }
 
-        let query = query.trim();
-        log::info!("统一搜索歌曲: '{query}'");
+        let mut query = initial_query.trim().to_string();
 
-        log::debug!("SONG_INFO 包含 {} 条记录", SONG_INFO.len());
-        log::debug!("SONG_NICKNAMES 包含 {} 条记录", SONG_NICKNAMES.len());
+        // 使用 loop 来代替递归，避免 `only_used_in_recursion` 警告
+        loop {
+            log::info!("统一搜索歌曲: '{query}'");
 
-        // 1. 尝试作为歌曲ID直接查找
-        if let Some(info) = SONG_INFO.iter().find(|info| info.id == query) {
-            log::info!("通过ID精确匹配找到歌曲: {}", info.song);
-            return Ok(info.clone());
-        }
+            let query_lower = query.to_lowercase();
 
-        // 2. 尝试作为歌曲名称查找
-        let query_lower = query.to_lowercase();
-        if let Some(info) = SONG_INFO
-            .iter()
-            .find(|info| info.song.to_lowercase() == query_lower)
-        {
-            log::info!("通过歌曲名精确匹配找到歌曲: {}", info.song);
-            return Ok(info.clone());
-        }
+            // 1. 尝试作为歌曲ID直接查找
+            if let Some(info) = SONG_INFO.iter().find(|info| info.id == query) {
+                log::info!("通过ID精确匹配找到歌曲: {}", info.song);
+                return Ok(info.clone());
+            }
 
-        // 3. 尝试作为别名查找
-        if let Some(song_name) = SONG_NICKNAMES.iter().find_map(|(name, nicknames)| {
-            nicknames
-                .iter()
-                .any(|nick| nick.to_lowercase() == query_lower)
-                .then_some(name)
-        }) {
-            log::info!("通过别名精确匹配找到歌曲: {song_name} (别名: {query})");
-            // 再次使用 search_song 查找，避免代码重复
-            return self.search_song(song_name);
-        }
+            // 2. 尝试作为歌曲名称精确查找
+            if let Some(info) = SONG_INFO.iter().find(|info| info.song.to_lowercase() == query_lower) {
+                log::info!("通过歌曲名精确匹配找到歌曲: {}", info.song);
+                return Ok(info.clone());
+            }
 
-        // 4. 尝试歌曲名模糊匹配
-        let name_matches: Vec<_> = SONG_INFO
-            .iter()
-            .filter(|info| info.song.to_lowercase().contains(&query_lower))
-            .collect();
-        if name_matches.len() == 1 {
-            log::info!("通过歌曲名模糊匹配找到歌曲: {}", name_matches[0].song);
-            return Ok(name_matches[0].clone());
-        }
-
-        // 5. 尝试别名模糊匹配
-        let nickname_matches: Vec<_> = SONG_NICKNAMES
-            .iter()
-            .filter_map(|(song_name, nicknames)| {
+            // 3. 尝试作为别名精确查找
+            if let Some(song_name) = SONG_NICKNAMES.iter().find_map(|(name, nicknames)| {
                 nicknames
                     .iter()
-                    .find(|nick| nick.to_lowercase().contains(&query_lower))
-                    .map(|nick| (song_name, nick))
-            })
-            .collect();
+                    .any(|nick| nick.to_lowercase() == query_lower)
+                    .then_some(name)
+            }) {
+                log::info!("通过别名精确匹配找到歌曲: {song_name} (别名: {query})");
+                query = song_name.to_string(); // 更新 query 并继续循环
+                continue;
+            }
 
-        if nickname_matches.len() == 1 {
-            let (song_name, nickname) = nickname_matches[0];
-            log::info!("通过别名模糊匹配找到歌曲: {song_name} (别名: {nickname})");
-            return self.search_song(song_name);
-        }
-
-        // 处理多个匹配的情况
-        if !name_matches.is_empty() {
-            let matches_str = name_matches
+            // 4. 尝试歌曲名模糊匹配
+            let name_matches: Vec<_> = SONG_INFO
                 .iter()
-                .map(|info| info.song.clone())
-                .collect::<Vec<_>>()
-                .join(", ");
-            log::info!("歌曲名模糊匹配找到多个歌曲: {matches_str}");
-            return Err(AppError::AmbiguousSongName(matches_str));
-        }
+                .filter(|info| info.song.to_lowercase().contains(&query_lower))
+                .collect();
+            if name_matches.len() == 1 {
+                log::info!("通过歌曲名模糊匹配找到歌曲: {}", name_matches[0].song);
+                return Ok(name_matches[0].clone());
+            }
 
-        if !nickname_matches.is_empty() {
-            let matches_str = nickname_matches
+            // 5. 尝试别名模糊匹配
+            let nickname_matches: Vec<_> = SONG_NICKNAMES
                 .iter()
-                .map(|(name, nick)| format!("{name} (别名: {nick})"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            log::info!("别名模糊匹配找到多个歌曲: {matches_str}");
-            return Err(AppError::AmbiguousSongName(matches_str));
-        }
+                .filter_map(|(song_name, nicknames)| {
+                    nicknames
+                        .iter()
+                        .find(|nick| nick.to_lowercase().contains(&query_lower))
+                        .map(|nick| (song_name, nick))
+                })
+                .collect();
 
-        log::info!("找不到匹配查询 '{query}' 的歌曲");
-        Err(AppError::SongNotFound(query.to_string()))
+            if nickname_matches.len() == 1 {
+                let (song_name, nickname) = nickname_matches[0];
+                log::info!("通过别名模糊匹配找到歌曲: {song_name} (别名: {nickname})");
+                query = song_name.to_string(); // 更新 query 并继续循环
+                continue;
+            }
+
+            // 6. 处理多个匹配的情况
+            if !name_matches.is_empty() {
+                let matches_str = name_matches
+                    .iter()
+                    .map(|info| info.song.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                log::info!("歌曲名模糊匹配找到多个歌曲: {matches_str}");
+                return Err(AppError::AmbiguousSongName(matches_str));
+            }
+
+            if !nickname_matches.is_empty() {
+                let matches_str = nickname_matches
+                    .iter()
+                    .map(|(name, nick)| format!("{name} (别名: {nick})"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                log::info!("别名模糊匹配找到多个歌曲: {matches_str}");
+                return Err(AppError::AmbiguousSongName(matches_str));
+            }
+
+            // 7. 如果循环结束仍未找到，则返回错误
+            log::info!("找不到匹配查询 '{query}' 的歌曲");
+            return Err(AppError::SongNotFound(query));
+        }
     }
 
     // 根据统一查询找ID

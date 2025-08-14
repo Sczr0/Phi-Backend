@@ -212,7 +212,7 @@ impl ImageService {
                     let money_str = game_progress
                         .get("money")
                         .and_then(|v| v.as_array())
-                        .map(|arr| {
+                        .and_then(|arr| {
                             let units = ["KB", "MB", "GB", "TB"];
                             let mut parts: Vec<String> = arr
                                 .iter()
@@ -233,8 +233,7 @@ impl ImageService {
                             } else {
                                 Some(format!("Data: {}", parts.join(", ")))
                             }
-                        })
-                        .flatten();
+                        });
 
                     (rank, money_str)
                 } else {

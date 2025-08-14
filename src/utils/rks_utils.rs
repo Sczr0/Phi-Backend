@@ -160,10 +160,8 @@ fn simulate_rks_increase(
 
     // 判断新记录是否能进入B27
     // 获取B27的最低RKS（如果B27不满27个，则最低为0）
-    let _b27_min_rks = if b27_candidates.len() < 27 && !removed_from_b27 {
-        0.0 // B27未满且旧记录不在B27中（或者不存在旧记录），新记录肯定能进
-    } else if b27_candidates.is_empty() {
-        0.0 // B27为空，新记录肯定能进
+    let _b27_min_rks = if (b27_candidates.len() < 27 && !removed_from_b27) || b27_candidates.is_empty() {
+        0.0 // B27未满或为空，新记录肯定能进
     } else {
         // 如果B27满了，需要和第27个（移除旧记录后可能是第26个）或B27之外的最高分比较
         let min_rks_in_current_b27 = b27_candidates.last().map_or(0.0, |r| r.rks);
@@ -259,7 +257,7 @@ fn simulate_rks_increase(
 pub fn calculate_target_chart_push_acc(
     target_chart_id_full: &str,
     target_chart_constant: f64,
-    all_sorted_records: &Vec<RksRecord>, // 确保传入的是已按RKS排序的Vec
+    all_sorted_records: &[RksRecord], // 确保传入的是已按RKS排序的Vec
 ) -> Option<f64> {
     log::debug!("开始计算推分ACC (优化版): 目标谱面={target_chart_id_full}, 定数={target_chart_constant:.1}");
 
@@ -407,44 +405,4 @@ pub fn calculate_target_chart_push_acc(
     log::debug!("最终推分ACC结果: {constrained_acc:.4}%");
     Some(constrained_acc)
 }
-/// --- 计算最小推分 ACC (旧版算法) ---
-#[deprecated(
-    note = "This is a legacy push ACC calculation method. Use calculate_target_chart_push_acc for more accurate results."
-)]
-pub fn calculate_min_push_acc(current_rks: f64, difficulty_value: f64) -> f64 {
-    // 无法有效计算的情况
-    if difficulty_value <= 0.0 {
-        return 100.0;
-    } // 定数为0无法计算
-
-    // 计算当前RKS四舍五入到两位小数
-    let current_rks_rounded = (current_rks * 100.0).round() / 100.0;
-    // 计算要达到下一个0.01 RKS所需的精确RKS阈值 (当前舍入值 + 0.005)
-    let target_rks_threshold = current_rks_rounded + 0.005;
-
-    // 如果当前RKS已经达到或超过了下一个阈值，说明无法通过"提升ACC"来达成"+0.01"的目标
-    if current_rks >= target_rks_threshold {
-        return 100.0; // 返回100表示已满或无法提升
-    }
-
-    // Phigros RKS正确计算公式: RKS = ((100×Acc - 55)/45)² × 定数
-    // 反解得到 ACC 小数 = (55 + 45 * sqrt(目标RKS / 定数)) / 100
-
-    // 防止除零或负数开方
-    let rks_ratio = target_rks_threshold / difficulty_value;
-    if rks_ratio < 0.0 {
-        return 100.0; // 不应该发生，但做保护
-    }
-
-    let sqrt_term = rks_ratio.sqrt();
-    let acc_decimal = (55.0 + 45.0 * sqrt_term) / 100.0;
-
-    // 转换为百分数形式并检查合理性
-    let acc_percent = acc_decimal * 100.0;
-
-    // 应用约束 [70.0, 100.0]
-    let constrained_acc = acc_percent.max(70.0).min(100.0);
-
-    // 向上取整到小数点后两位，确保稳定跨过阈值
-    (constrained_acc * 100.0).ceil() / 100.0
-}
+// 旧的 `calculate_min_push_acc` 函数已被移除，因为它已被弃用且未被使用。

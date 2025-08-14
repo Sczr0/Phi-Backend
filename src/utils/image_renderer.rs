@@ -189,20 +189,37 @@ fn get_background_image(path: &PathBuf) -> Option<String> {
 }
 
 // Helper function to generate a single score card SVG group
-fn generate_card_svg(
-    svg: &mut String,
-    score: &RksRecord,
+struct CardRenderInfo<'a> {
+    svg: &'a mut String,
+    score: &'a RksRecord,
     index: usize,
     card_x: u32,
     card_y: u32,
     card_width: u32,
-    is_ap_card: bool,  // Flag to indicate if this is for the AP section
-    is_ap_score: bool, // Flag to indicate if the score itself is AP
-    pre_calculated_push_acc: Option<f64>, // 新增：预先计算的推分ACC
-    all_sorted_records: &[RksRecord], // 新增：所有排序好的成绩，用于新版推分计算
-    theme: &crate::controllers::image::Theme, // 新增：主题参数
-) -> Result<(), AppError> {
+    is_ap_card: bool,
+    is_ap_score: bool,
+    pre_calculated_push_acc: Option<f64>,
+    all_sorted_records: &'a [RksRecord],
+    theme: &'a crate::controllers::image::Theme,
+}
+
+fn generate_card_svg(info: CardRenderInfo) -> Result<(), AppError> {
     let fmt_err = |e| AppError::InternalError(format!("SVG formatting error: {e}"));
+
+    // Destructure for convenience
+    let CardRenderInfo {
+        svg,
+        score,
+        index,
+        card_x,
+        card_y,
+        card_width,
+        is_ap_card,
+        is_ap_score,
+        pre_calculated_push_acc,
+        all_sorted_records,
+        theme,
+    } = info;
 
     // --- Card Dimensions & Layout ---
     let card_padding = 10.0; // Inner padding
@@ -353,11 +370,10 @@ fn generate_card_svg(
         } else {
             // 否则使用新算法计算
             let target_chart_id = format!("{}-{}", score.song_id, score.difficulty);
-            let all_records_vec = all_sorted_records.to_vec(); // 需要 Vec<RksRecord>
             rks_utils::calculate_target_chart_push_acc(
                 &target_chart_id,
                 score.difficulty_value,
-                &all_records_vec,
+                all_sorted_records,
             )
             .unwrap_or(100.0) // 如果计算失败（比如格式错误），则默认为100
         };
@@ -876,19 +892,19 @@ pub fn generate_svg_string(
                 map.get(&key).copied()
             });
 
-            generate_card_svg(
-                &mut svg,
+            generate_card_svg(CardRenderInfo {
+                svg: &mut svg,
                 score,
-                idx,
-                x_pos,
-                ap_card_start_y,
-                main_card_width,
-                true,
-                true,
-                push_acc,
-                scores,
+                index: idx,
+                card_x: x_pos,
+                card_y: ap_card_start_y,
+                card_width: main_card_width,
+                is_ap_card: true,
+                is_ap_score: true,
+                pre_calculated_push_acc: push_acc,
+                all_sorted_records: scores,
                 theme,
-            )?;
+            })?;
         }
         writeln!(svg, r#"</g>"#).map_err(fmt_err)?;
     }
@@ -910,19 +926,19 @@ pub fn generate_svg_string(
             map.get(&key).copied()
         });
 
-        generate_card_svg(
-            &mut svg,
+        generate_card_svg(CardRenderInfo {
+            svg: &mut svg,
             score,
             index,
-            x,
-            y,
-            main_card_width,
-            false,
+            card_x: x,
+            card_y: y,
+            card_width: main_card_width,
+            is_ap_card: false,
             is_ap_score,
-            push_acc,
-            scores,
+            pre_calculated_push_acc: push_acc,
+            all_sorted_records: scores,
             theme,
-        )?;
+        })?;
     }
 
     // --- Footer ---
@@ -1038,88 +1054,6 @@ fn calculate_inverse_color_from_path(path: &Path) -> Option<String> {
     let inv_b = 255 - avg_b;
 
     Some(format!("#{inv_r:02X}{inv_g:02X}{inv_b:02X}"))
-}
-
-/// 从图片路径计算主色的反色
-// ... (load_custom_fonts function - unchanged) ...
-fn load_custom_fonts(font_db: &mut fontdb::Database) -> Result<(), AppError> {
-    let fonts_dir = PathBuf::from(FONTS_DIR);
-    if !fonts_dir.exists() {
-        log::warn!("Fonts directory does not exist: {}", fonts_dir.display());
-        return Ok(());
-    }
-    let entries = match fs::read_dir(&fonts_dir) {
-        Ok(entries) => entries,
-        Err(e) => {
-            log::error!(
-                "Failed to read fonts directory '{}': {}",
-                fonts_dir.display(),
-                e
-            );
-            return Err(AppError::InternalError(format!(
-                "Failed to read fonts directory: {e}"
-            )));
-        }
-    };
-    let mut fonts_loaded = false;
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(e) => {
-                log::warn!(
-                    "Failed to read directory entry in {}: {}",
-                    fonts_dir.display(),
-                    e
-                );
-                continue;
-            }
-        };
-        let path = entry.path();
-        if path.is_file()
-            && path
-                .extension()
-                .is_some_and(|ext| ext == "ttf" || ext == "otf")
-        {
-            log::debug!("Loading custom font: {}", path.display());
-            match font_db.load_font_file(&path) {
-                Ok(_) => fonts_loaded = true,
-                Err(e) => {
-                    log::error!("CRITICAL: Failed to load custom font file '{}': {}. Text rendering might be incorrect.", path.display(), e);
-                }
-            }
-        }
-    }
-    if !fonts_loaded {
-        log::warn!(
-            "No custom fonts were successfully loaded from {}",
-            fonts_dir.display()
-        );
-    }
-    Ok(())
-}
-
-// ... (find_first_font_file function - unchanged, can likely be removed too) ...
-#[allow(dead_code)]
-fn find_first_font_file(dir: &Path) -> Result<Option<PathBuf>, AppError> {
-    if !dir.exists() {
-        return Ok(None);
-    }
-    let entries = fs::read_dir(dir).map_err(|e| {
-        AppError::InternalError(format!("Failed to read directory {}: {}", dir.display(), e))
-    })?;
-    for entry in entries {
-        let entry = entry
-            .map_err(|e| AppError::InternalError(format!("Failed to read directory entry: {e}")))?;
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(ext) = path.extension() {
-                if ext == "ttf" || ext == "otf" {
-                    return Ok(Some(path));
-                }
-            }
-        }
-    }
-    Ok(None)
 }
 
 // --- 新增：生成单曲成绩 SVG ---
@@ -1536,38 +1470,38 @@ pub fn generate_leaderboard_svg_string(data: &LeaderboardRenderData) -> Result<S
                 font-family: 'NotoSansSC';
                 src: url('https://fonts.gstatic.com/s/notosanssc/v36/k3kXo84MPvpLmixcA63oeALhLIiP-Q-87KaAavc.woff2') format('woff2');
             }
-            .header-text { 
-                font-family: 'NotoSansSC', sans-serif; 
-                font-size: 48px; 
-                fill: white; 
-                text-anchor: middle; 
+            .header-text {
+                font-family: 'NotoSansSC', sans-serif;
+                font-size: 48px;
+                fill: white;
+                text-anchor: middle;
                 font-weight: bold; /* 加粗标题 */
             }
-            .rank-text { 
-                font-family: 'NotoSansSC', sans-serif; 
-                font-size: 32px; 
-                fill: white; 
-                text-anchor: middle; 
+            .rank-text {
+                font-family: 'NotoSansSC', sans-serif;
+                font-size: 32px;
+                fill: white;
+                text-anchor: middle;
                 font-weight: bold;
             }
-            .name-text { 
-                font-family: 'NotoSansSC', sans-serif; 
-                font-size: 32px; 
-                fill: white; 
-                text-anchor: start; 
+            .name-text {
+                font-family: 'NotoSansSC', sans-serif;
+                font-size: 32px;
+                fill: white;
+                text-anchor: start;
             }
-            .rks-text { 
-                font-family: 'NotoSansSC', sans-serif; 
-                font-size: 32px; 
-                fill: white; 
-                text-anchor: end; 
+            .rks-text {
+                font-family: 'NotoSansSC', sans-serif;
+                font-size: 32px;
+                fill: white;
+                text-anchor: end;
                 font-weight: bold;
             }
-            .footer-text { 
-                font-family: 'NotoSansSC', sans-serif; 
-                font-size: 20px; 
-                fill: #aaaaaa; 
-                text-anchor: end; 
+            .footer-text {
+                font-family: 'NotoSansSC', sans-serif;
+                font-size: 20px;
+                fill: #aaaaaa;
+                text-anchor: end;
             }
         </style>
     </defs>
