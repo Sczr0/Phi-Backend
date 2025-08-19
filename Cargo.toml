@@ -78,12 +78,15 @@ lru = "0.12"
 # API文档
 utoipa = { version = "4.2.0", features = ["actix_extras"] }
 utoipa-swagger-ui = { version = "7.1.0", features = ["actix-web"] }
+once_cell = "1.21.3"
 
 [features]
 default = []
 
-# 添加 release 配置以包含调试信息
 [profile.release]
+
+[profile.release-with-debug]
+inherits = "release"
 debug = true
 
 # cargo-machete 的配置。如果没有任何需要忽略的依赖，此部分可以完全删除。
