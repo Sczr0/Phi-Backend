@@ -22,9 +22,7 @@ pub fn calculate_player_rks_details(records: &[RksRecord]) -> (f64, f64) {
     let ap_top_3_sum: f64 = ap_records.clone().take(3).map(|r| r.rks).sum();
     let ap3_count = ap_records.count().min(3);
     log::debug!(
-        "[B30 RKS] AP Top 3 计算: 使用了 {} 个AP成绩，总和 = {:.4}",
-        ap3_count,
-        ap_top_3_sum
+        "[B30 RKS] AP Top 3 计算: 使用了 {ap3_count} 个AP成绩，总和 = {ap_top_3_sum:.4}"
     );
 
     let final_exact_rks = (best_27_sum + ap_top_3_sum) / 30.0;

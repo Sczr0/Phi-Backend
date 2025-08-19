@@ -34,7 +34,7 @@ pub fn encrypt(data: &[u8]) -> AppResult<Vec<u8>> {
     // 直接使用已经初始化好的静态 KEY 和 IV
     // new_from_slices 已经隐式地验证了长度，因为我们用了固定长度数组 [u8; 32]
     let cipher = Encryptor::<Aes256>::new_from_slices(&*AES_KEY, &*AES_IV)
-        .map_err(|e| AppError::AesError(format!("AES加密器初始化失败: {}", e)))?;
+        .map_err(|e| AppError::AesError(format!("AES加密器初始化失败: {e}")))?;
 
     // 直接让库处理填充和加密
     let result = cipher.encrypt_padded_vec_mut::<Pkcs7>(data);
@@ -45,15 +45,15 @@ pub fn encrypt(data: &[u8]) -> AppResult<Vec<u8>> {
 pub fn decrypt(data: &[u8]) -> AppResult<Vec<u8>> {
     // 同样，直接使用静态 KEY 和 IV
     let cipher = Decryptor::<Aes256>::new_from_slices(&*AES_KEY, &*AES_IV)
-        .map_err(|e| AppError::AesError(format!("AES解密器初始化失败: {}", e)))?;
+        .map_err(|e| AppError::AesError(format!("AES解密器初始化失败: {e}")))?;
 
     // 库会处理解密和去填充，如果填充错误或数据损坏，这里会返回Err
     cipher
         .decrypt_padded_vec_mut::<Pkcs7>(data)
         .map_err(|e| {
-            log::error!("AES解密失败: {}", e);
+            log::error!("AES解密失败: {e}");
             // 这里的错误比简单的 to_string() 信息更丰富
-            AppError::AesError(format!("解密或去填充失败: {}", e))
+            AppError::AesError(format!("解密或去填充失败: {e}"))
         })
 }
 
@@ -62,7 +62,7 @@ pub fn calculate_md5(data: &[u8]) -> String {
     let mut hasher = Md5::new();
     hasher.update(data);
     let result = hasher.finalize();
-    format!("{:x}", result)
+    format!("{result:x}")
 }
 
 
