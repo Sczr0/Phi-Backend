@@ -4,19 +4,37 @@ use utoipa::ToSchema;
 
 use crate::models::save::SongRecord;
 
+/// RKS记录结构体
+/// 包含单首歌曲在特定难度下的RKS相关信息
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RksRecord {
+    /// 歌曲ID
     pub song_id: String,
+    /// 歌曲名称
     pub song_name: String,
+    /// 难度级别 (EZ, HD, IN, AT)
     pub difficulty: String,
+    /// 难度定数
     pub difficulty_value: f64,
+    /// 准确度
     pub acc: f64,
+    /// 分数（可选）
     pub score: Option<f64>,
+    /// RKS值
     pub rks: f64,
+    /// 是否Full Combo
     pub is_fc: bool,
 }
 
 impl RksRecord {
+    /// 创建新的RKS记录
+    /// 
+    /// # 参数
+    /// * `song_id` - 歌曲ID
+    /// * `song_name` - 歌曲名称
+    /// * `difficulty` - 难度级别
+    /// * `difficulty_value` - 难度定数
+    /// * `record` - 歌曲记录
     pub fn new(
         song_id: String,
         song_name: String,
@@ -64,12 +82,19 @@ impl Ord for RksRecord {
     }
 }
 
+/// RKS结果结构体
+/// 包含排序后的RKS记录列表
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RksResult {
+    /// RKS记录列表，按RKS值降序排列
     pub records: Vec<RksRecord>,
 }
 
 impl RksResult {
+    /// 创建新的RKS结果
+    /// 
+    /// # 参数
+    /// * `records` - RKS记录列表
     pub fn new(records: Vec<RksRecord>) -> Self {
         let mut all_records = records.clone();
         all_records.sort_by(|a, b| b.rks.partial_cmp(&a.rks).unwrap_or(Ordering::Equal));

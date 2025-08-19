@@ -327,13 +327,11 @@ pub fn decrypt_save(save_dict: HashMap<String, Vec<u8>>) -> AppResult<GameSave> 
             encrypted_data.len()
         );
 
-        let decrypted_data = match decrypt(encrypted_data) {
-            Ok(data) => data,
-            Err(e) => {
+        let decrypted_data = decrypt(encrypted_data)
+            .map_err(|e| {
                 log::error!("解密文件 {filename} 失败: {e}");
-                return Err(AppError::AesError(format!("解密文件 {filename} 失败: {e}")));
-            }
-        };
+                AppError::AesError(format!("解密文件 {filename} 失败: {e}"))
+            })?;
         log::debug!(
             "文件 {} 解密后大小: {} 字节",
             filename,

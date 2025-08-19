@@ -99,7 +99,7 @@ impl ImageService {
             .unwrap_or("unknown")
             .to_string();
         
-        let player_nickname = profile_res.ok().map(|p| p.nickname).unwrap_or_default();
+        let _player_nickname = profile_res.ok().map(|p| p.nickname).unwrap_or_default();
         
         // 使用更精确的缓存键，包括用户标识和n值以及主题
         let cache_key = (n, player_id.clone(), theme.clone());
@@ -216,16 +216,20 @@ impl ImageService {
                     None
                 };
 
+                // 性能优化：对于未绑定的直接提供Token的用户，计算推分acc时只限制在规定范围内
+                // 比如渲染Bn图片时仅计算BestN以内的推分acc
                 let push_acc_map: HashMap<String, f64> = top_n_scores
                     .iter()
                     .filter(|score| score.acc < 100.0 && score.difficulty_value > 0.0)
                     .filter_map(|score| {
                         let target_chart_id_full =
                             format!("{}-{}", score.song_id, score.difficulty);
+                        // 优化：只使用top_n_scores而不是sorted_scores来计算推分acc
+                        // 这样可以减少计算量，提高性能
                         rks_utils::calculate_target_chart_push_acc(
                             &target_chart_id_full,
                             score.difficulty_value,
-                            &sorted_scores,
+                            &top_n_scores, // 使用优化后的范围
                         )
                         .map(|push_acc| (target_chart_id_full, push_acc))
                     })

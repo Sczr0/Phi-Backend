@@ -1,27 +1,33 @@
- # Rust build artifacts
+# Rust 构建产物
 /target/
 
-# Environment configuration file
+# 环境配置文件
 .env
 phigros_bindings.db
 
-# IDE/Editor specific files
+# IDE/编辑器特定文件
 .idea/
 .vscode/
 .cursor/
 .codebuddy/
-.claude
+.claude/
 
-# OS specific files
+# 操作系统特定文件
 .DS_Store
 Thumbs.db
 
-/phi-backend-service/
+# Claude Code 生成的文件
+CLAUDE.md
 
-/html
+# 重构相关
+/phi-backend-service/
+/重构/
 REFACTORING_PLAN.md
+
+# 测试和临时文件
 test.html
 test.md
 phi-backend-rust.exe
 
-/重构
+# 前端构建产物
+/html/
