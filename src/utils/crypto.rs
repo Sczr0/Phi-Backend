@@ -71,5 +71,5 @@ pub fn validate_session_token(token: &str) -> bool {
     if token.len() != 25 {
         return false;
     }
-    token.chars().all(|c| c.is_ascii_alphanumeric() && c.is_ascii_lowercase())
+    token.chars().all(|c| c.is_ascii_alphanumeric())
 }
