@@ -3,7 +3,7 @@ use crate::models::user::{
 };
 use crate::utils::error::{AppError, AppResult};
 use chrono::{Duration, Utc};
-use rand::{distributions::Alphanumeric, Rng};
+use rand::Rng;
 use sqlx::SqlitePool;
 
 // 用户服务，管理内部ID和平台绑定关系
@@ -232,10 +232,15 @@ impl UserService {
     ) -> AppResult<UnbindVerificationCode> {
         let platform = platform.to_lowercase();
 
-        let code: String = rand::thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(8)
-            .map(char::from)
+        const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
+                            abcdefghijklmnopqrstuvwxyz\
+                            0123456789";
+        let mut rng = rand::thread_rng();
+        let code: String = (0..8)
+            .map(|_| {
+                let idx = rng.gen_range(0..CHARSET.len());
+                CHARSET[idx] as char
+            })
             .collect();
 
         let expires_at = Utc::now() + Duration::minutes(5);

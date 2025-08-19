@@ -4,7 +4,8 @@ use serde_json::json;
 use utoipa;
 
 use crate::models::user::{
-    ApiResponse, BindRequest, IdentifierRequest, PlatformBinding, UnbindInitiateResponse,
+    ApiResponse, BindRequest, IdentifierRequest, PlatformBinding, TokenListResponse,
+    UnbindInitiateResponse,
 };
 use crate::services::phigros::PhigrosService;
 use crate::services::user::UserService;
@@ -274,7 +275,7 @@ pub async fn unbind_user(
                                 data: Some(json!({ "internal_id": internal_id })),
                             }))
                         } else {
-                            log::warn!("简介验证失败 for 平台 '{}' 的 ID '{}'. Expected code '{}', got intro '{}'", 
+                            log::warn!("简介验证失败 for 平台 '{}' 的 ID '{}'. Expected code '{}', got intro '{}'",
                                 platform, platform_id, code.trim(), intro.trim());
                             Err(AppError::ProfileVerificationFailed(
                                 "简介内容与提供的验证码不匹配".to_string(),

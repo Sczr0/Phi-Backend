@@ -2,6 +2,7 @@ use actix_web::{post, web, HttpResponse};
 use std::collections::HashMap;
 use utoipa;
 
+use crate::models::b30::B30Result;
 use crate::models::user::{ApiResponse, IdentifierRequest};
 use crate::services::phigros::PhigrosService;
 use crate::services::player_archive_service::PlayerArchiveService;

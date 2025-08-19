@@ -3,6 +3,7 @@ use log::debug;
 use std::collections::HashMap;
 use utoipa;
 
+use crate::models::rks::{RksRecord, RksResult};
 use crate::models::user::{ApiResponse, IdentifierRequest};
 use crate::services::phigros::PhigrosService;
 use crate::services::player_archive_service::PlayerArchiveService;

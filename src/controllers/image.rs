@@ -12,7 +12,7 @@ use crate::utils::error::AppError;
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
-#[derive(Default)]
+#[derive(Default, ToSchema)]
 pub enum Theme {
     #[default]
     Black,

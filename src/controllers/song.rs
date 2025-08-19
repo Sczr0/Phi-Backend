@@ -6,6 +6,7 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::models::{
     predictions::PredictionResponse,
+    save::SongRecord,
     song::SongInfo,
     user::{ApiResponse, IdentifierRequest},
 };
@@ -66,7 +67,7 @@ pub async fn search_song(
     params(SongSearchQuery),
     request_body = IdentifierRequest,
     responses(
-        (status = 200, description = "成功找到歌曲成绩记录", body = ApiResponse<models::save::SongRecord>)
+        (status = 200, description = "成功找到歌曲成绩记录", body = ApiResponse<SongRecord>)
     )
 )]
 #[post("/song/search/record")]
@@ -157,7 +158,7 @@ pub struct SongRecordQuery {
     params(SongRecordQuery),
     request_body = IdentifierRequest,
     responses(
-        (status = 200, description = "成功找到歌曲成绩", body = ApiResponse<models::save::SongRecord>)
+        (status = 200, description = "成功找到歌曲成绩", body = ApiResponse<SongRecord>)
     )
 )]
 #[post("/song/record")]

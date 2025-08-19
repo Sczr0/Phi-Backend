@@ -6,8 +6,7 @@ use crate::utils::rks_utils;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added
 use chrono::{DateTime, FixedOffset, Utc};
 use lru::LruCache;
-use rand::seq::SliceRandom;
-use rand::thread_rng;
+use rand::prelude::*;
 use resvg::usvg::{self, fontdb, Options as UsvgOptions};
 use resvg::{
     render,
@@ -609,8 +608,8 @@ pub fn generate_svg_string(
     };
 
     if !background_files.is_empty() {
-        let mut rng = thread_rng();
-        if let Some(random_path) = background_files.choose(&mut rng) {
+        let mut rng = rand::thread_rng();
+        if let Some(random_path) = background_files.as_slice().choose(&mut rng) {
             // 随机选择一个路径
             // --- 新增：计算背景主色的反色 ---
             if let crate::controllers::image::Theme::White = theme {
@@ -622,7 +621,7 @@ pub fn generate_svg_string(
             // --- 结束新增 ---
 
             // 使用缓存函数获取背景图片
-            if let Some(image_data) = get_background_image(random_path) {
+            if let Some(image_data) = get_background_image(&random_path.to_path_buf()) {
                 background_image_href = Some(image_data);
                 log::info!("使用随机背景图: {}", random_path.display());
             } else {
@@ -977,7 +976,7 @@ pub fn generate_svg_string(
 // ... (render_svg_to_png function - unchanged) ...
 pub fn render_svg_to_png(svg_data: String) -> Result<Vec<u8>, AppError> {
     // 使用全局字体数据库
-    let font_db = get_global_font_db();
+    let _font_db = get_global_font_db();
 
     let opts = UsvgOptions {
         resources_dir: Some(
@@ -993,8 +992,7 @@ pub fn render_svg_to_png(svg_data: String) -> Result<Vec<u8>, AppError> {
         ..Default::default()
     };
 
-    let font_db_rc = Arc::clone(&font_db);
-    let tree = usvg::Tree::from_data(svg_data.as_bytes(), &opts, &font_db_rc)
+    let tree = usvg::Tree::from_data(svg_data.as_bytes(), &opts)
         .map_err(|e| AppError::InternalError(format!("Failed to parse SVG: {e}")))?;
 
     let pixmap_size = tree.size().to_int_size();
@@ -1123,8 +1121,8 @@ pub fn generate_song_svg_string(data: &SongRenderData) -> Result<String, AppErro
         // 如果找不到当前曲目的曲绘，则随机选一个
         let cover_files = get_cover_files();
         if !cover_files.is_empty() {
-            let mut rng = thread_rng();
-            if let Some(random_path) = cover_files.choose(&mut rng) {
+            let mut rng = rand::thread_rng();
+            if let Some(random_path) = cover_files.as_slice().choose(&mut rng) {
                 // 使用缓存函数获取背景图片
                 if let Some(image_data) = get_background_image(random_path) {
                     background_image_href = Some(image_data);
