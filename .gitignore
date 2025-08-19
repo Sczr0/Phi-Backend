@@ -10,6 +10,7 @@ phigros_bindings.db
 .vscode/
 .cursor/
 .codebuddy/
+.claude
 
 # OS specific files
 .DS_Store

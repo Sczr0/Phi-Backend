@@ -568,6 +568,18 @@ ORDER BY rs.play_time DESC;
         Ok(ranking_entries)
     }
 
+    /// 获取最新的RKS更新时间
+    pub async fn get_latest_rks_update_time(&self) -> Result<String, AppError> {
+        let result = sqlx::query_scalar::<_, String>(
+            "SELECT MAX(update_time) FROM player_archives"
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+        
+        Ok(result.unwrap_or_else(|| chrono::Utc::now().to_rfc3339()))
+    }
+
     /// 辅助函数：获取推分ACC
     async fn get_push_acc_map(
         &self,

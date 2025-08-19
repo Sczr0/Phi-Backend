@@ -147,3 +147,21 @@ pub async fn get_rks_leaderboard(
 
     Ok(HttpResponse::Ok().content_type("image/png").body(result))
 }
+
+/// 获取图片缓存统计信息
+///
+/// 返回各个图片缓存的命中率和统计信息。
+#[utoipa::path(
+    get,
+    path = "/cache/stats",
+    responses(
+        (status = 200, description = "成功获取缓存统计信息", body = serde_json::Value)
+    )
+)]
+#[get("/cache/stats")]
+pub async fn get_cache_stats(
+    image_service: web::Data<ImageService>,
+) -> Result<HttpResponse, AppError> {
+    let stats = image_service.get_cache_stats();
+    Ok(HttpResponse::Ok().json(stats))
+}

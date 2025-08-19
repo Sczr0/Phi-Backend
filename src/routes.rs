@@ -40,6 +40,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         web::scope("/image")
             .service(controllers::image::generate_bn_image)
             .service(controllers::image::generate_song_image)
-            .service(controllers::image::get_rks_leaderboard),
+            .service(controllers::image::get_rks_leaderboard)
+            .service(controllers::image::get_cache_stats),
     );
 }

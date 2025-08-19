@@ -20,32 +20,52 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio;
 
+// 添加用于缓存统计的原子计数器
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+
 // --- ImageService 结构体定义 ---
 
 pub struct ImageService {
     bn_image_cache: Cache<(u32, String, crate::controllers::image::Theme), Arc<Vec<u8>>>,
     song_image_cache: Cache<(String, String), Arc<Vec<u8>>>,
-    leaderboard_image_cache: Cache<usize, Arc<Vec<u8>>>,
+    leaderboard_image_cache: Cache<(usize, String), Arc<Vec<u8>>>,
+    // 添加缓存统计计数器
+    bn_cache_hits: AtomicU64,
+    bn_cache_misses: AtomicU64,
+    song_cache_hits: AtomicU64,
+    song_cache_misses: AtomicU64,
+    leaderboard_cache_hits: AtomicU64,
+    leaderboard_cache_misses: AtomicU64,
 }
 
 impl ImageService {
     pub fn new() -> Self {
         Self {
-            // B-side图片缓存：最多缓存1000张，每张图片缓存10分钟
+            // B-side图片缓存：最多缓存3000张，每张图片缓存20分钟
+            // 考虑到BN图片生成较重，增加缓存容量和时间
             bn_image_cache: Cache::builder()
-                .max_capacity(1000)
-                .time_to_live(Duration::from_secs(10 * 60))
+                .max_capacity(3000)
+                .time_to_live(Duration::from_secs(20 * 60))
                 .build(),
-            // 歌曲图片缓存：最多缓存1000张，每张图片缓存10分钟
+            // 歌曲图片缓存：最多缓存5000张，每张图片缓存20分钟
+            // 歌曲图片相对轻量，可以缓存更多
             song_image_cache: Cache::builder()
-                .max_capacity(1000)
-                .time_to_live(Duration::from_secs(10 * 60))
+                .max_capacity(5000)
+                .time_to_live(Duration::from_secs(20 * 60))
                 .build(),
             // 排行榜图片缓存：最多缓存100张，每张图片缓存5分钟
+            // 排行榜变化频繁，适当增加缓存时间和容量
             leaderboard_image_cache: Cache::builder()
                 .max_capacity(100)
                 .time_to_live(Duration::from_secs(5 * 60))
                 .build(),
+            // 初始化缓存统计计数器
+            bn_cache_hits: AtomicU64::new(0),
+            bn_cache_misses: AtomicU64::new(0),
+            song_cache_hits: AtomicU64::new(0),
+            song_cache_misses: AtomicU64::new(0),
+            leaderboard_cache_hits: AtomicU64::new(0),
+            leaderboard_cache_misses: AtomicU64::new(0),
         }
     }
 }
@@ -63,7 +83,36 @@ impl ImageService {
         player_archive_service: web::Data<PlayerArchiveService>,
     ) -> Result<Vec<u8>, AppError> {
         let token = resolve_token(&identifier, &user_service).await?;
-        let cache_key = (n, token.clone(), theme.clone());
+        
+        // 获取用户信息用于缓存键，确保用户数据变化时缓存失效
+        let (rks_save_res, profile_res) = tokio::join!(
+            phigros_service.get_rks(&token),
+            phigros_service.get_profile(&token)
+        );
+        
+        let (_all_rks_result, save) = rks_save_res?;
+        let player_id = save
+            .user
+            .as_ref()
+            .and_then(|u| u.get("objectId"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        
+        let player_nickname = profile_res.ok().map(|p| p.nickname).unwrap_or_default();
+        
+        // 使用更精确的缓存键，包括用户标识和n值以及主题
+        let cache_key = (n, player_id.clone(), theme.clone());
+        
+        // 尝试从缓存获取
+        if let Some(cached) = self.bn_image_cache.get(&cache_key).await {
+            self.bn_cache_hits.fetch_add(1, AtomicOrdering::Relaxed);
+            log::debug!("BN图片缓存命中: n={}, player={}", n, &player_id[..8]);
+            return Ok(cached.to_vec());
+        }
+        
+        self.bn_cache_misses.fetch_add(1, AtomicOrdering::Relaxed);
+        log::debug!("BN图片缓存未命中: n={}, player={}", n, &player_id[..8]);
 
         let image_bytes_arc = self
             .bn_image_cache
@@ -255,7 +304,7 @@ impl ImageService {
                 };
 
                 let theme_clone = theme.clone();
-                let png_data = web::block(move || {
+                let png_data = tokio::task::spawn_blocking(move || {
                     let svg_string = image_renderer::generate_svg_string(
                         &top_n_scores,
                         &stats,
@@ -265,7 +314,8 @@ impl ImageService {
                     image_renderer::render_svg_to_png(svg_string)
                 })
                 .await
-                .map_err(|e| AppError::InternalError(format!("Blocking task join error: {e}")))??;
+                .map_err(|e| AppError::InternalError(format!("Blocking task join error: {e}")))?
+                .map_err(|e| AppError::InternalError(format!("SVG rendering error: {e}")))?;
 
                 Ok(Arc::new(png_data))
             })
@@ -286,7 +336,36 @@ impl ImageService {
         player_archive_service: web::Data<PlayerArchiveService>,
     ) -> Result<Vec<u8>, AppError> {
         let token = resolve_token(&identifier, &user_service).await?;
-        let cache_key = (song_query.clone(), token.clone());
+        
+        // 获取歌曲信息用于缓存键
+        let song_info = song_service.search_song(&song_query)?;
+        let song_id = song_info.id.clone();
+        
+        // 获取用户信息用于缓存键
+        let save_result = phigros_service.get_rks(&token).await;
+        let player_id = if let Ok((_, save)) = &save_result {
+            save.user
+                .as_ref()
+                .and_then(|u| u.get("objectId"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string()
+        } else {
+            "unknown".to_string()
+        };
+        
+        // 使用更精确的缓存键，包括歌曲ID和用户标识
+        let cache_key = (song_id.clone(), player_id.clone());
+        
+        // 尝试从缓存获取
+        if let Some(cached) = self.song_image_cache.get(&cache_key).await {
+            self.song_cache_hits.fetch_add(1, AtomicOrdering::Relaxed);
+            log::debug!("歌曲图片缓存命中: song_id={}, player={}", &song_id[..std::cmp::min(20, song_id.len())], &player_id[..8]);
+            return Ok(cached.to_vec());
+        }
+        
+        self.song_cache_misses.fetch_add(1, AtomicOrdering::Relaxed);
+        log::debug!("歌曲图片缓存未命中: song_id={}, player={}", &song_id[..std::cmp::min(20, song_id.len())], &player_id[..8]);
 
         let image_bytes_arc = self
             .song_image_cache
@@ -431,12 +510,13 @@ impl ImageService {
                     illustration_path,
                 };
 
-                let png_data = web::block(move || {
+                let png_data = tokio::task::spawn_blocking(move || {
                     let svg_string = image_renderer::generate_song_svg_string(&render_data)?;
                     image_renderer::render_svg_to_png(svg_string)
                 })
                 .await
-                .map_err(|e| AppError::InternalError(format!("Blocking task join error: {e}")))??;
+                .map_err(|e| AppError::InternalError(format!("Blocking task join error: {e}")))?
+                .map_err(|e| AppError::InternalError(format!("SVG rendering error: {e}")))?;
 
                 Ok(Arc::new(png_data))
             })
@@ -454,7 +534,26 @@ impl ImageService {
         player_archive_service: web::Data<PlayerArchiveService>,
     ) -> Result<Vec<u8>, AppError> {
         let actual_limit = limit.unwrap_or(20).min(100);
-        let cache_key = actual_limit;
+        
+        // 获取排行榜更新时间用于缓存键
+        let last_update = player_archive_service
+            .get_ref()
+            .get_latest_rks_update_time()
+            .await
+            .unwrap_or_else(|_| "unknown".to_string());
+        
+        // 使用包含更新时间的缓存键
+        let cache_key = (actual_limit, last_update.clone());
+        
+        // 尝试从缓存获取
+        if let Some(cached) = self.leaderboard_image_cache.get(&cache_key).await {
+            self.leaderboard_cache_hits.fetch_add(1, AtomicOrdering::Relaxed);
+            log::debug!("排行榜图片缓存命中: limit={}, update_time={}", actual_limit, &last_update[..std::cmp::min(10, last_update.len())]);
+            return Ok(cached.to_vec());
+        }
+        
+        self.leaderboard_cache_misses.fetch_add(1, AtomicOrdering::Relaxed);
+        log::debug!("排行榜图片缓存未命中: limit={}, update_time={}", actual_limit, &last_update[..std::cmp::min(10, last_update.len())]);
 
         let image_bytes_arc = self
             .leaderboard_image_cache
@@ -475,11 +574,12 @@ impl ImageService {
 
                 let svg_string = image_renderer::generate_leaderboard_svg_string(&render_data)?;
 
-                let png_data = web::block(move || image_renderer::render_svg_to_png(svg_string))
+                let png_data = tokio::task::spawn_blocking(move || image_renderer::render_svg_to_png(svg_string))
                     .await
                     .map_err(|e| {
                         AppError::InternalError(format!("Blocking task error for leaderboard: {e}"))
-                    })??;
+                    })?
+                    .map_err(|e| AppError::InternalError(format!("SVG rendering error: {e}")))?;
 
                 Ok(Arc::new(png_data))
             })
@@ -487,5 +587,52 @@ impl ImageService {
             .map_err(|e: Arc<AppError>| AppError::InternalError(e.to_string()))?;
 
         Ok(image_bytes_arc.to_vec())
+    }
+}
+
+// 添加缓存统计方法
+impl ImageService {
+    pub fn get_cache_stats(&self) -> serde_json::Value {
+        let bn_hits = self.bn_cache_hits.load(std::sync::atomic::Ordering::Relaxed);
+        let bn_misses = self.bn_cache_misses.load(std::sync::atomic::Ordering::Relaxed);
+        let bn_hit_rate = if bn_hits + bn_misses > 0 {
+            format!("{:.2}%", (bn_hits as f64 / (bn_hits + bn_misses) as f64) * 100.0)
+        } else {
+            "0.00%".to_string()
+        };
+
+        let song_hits = self.song_cache_hits.load(std::sync::atomic::Ordering::Relaxed);
+        let song_misses = self.song_cache_misses.load(std::sync::atomic::Ordering::Relaxed);
+        let song_hit_rate = if song_hits + song_misses > 0 {
+            format!("{:.2}%", (song_hits as f64 / (song_hits + song_misses) as f64) * 100.0)
+        } else {
+            "0.00%".to_string()
+        };
+
+        let leaderboard_hits = self.leaderboard_cache_hits.load(std::sync::atomic::Ordering::Relaxed);
+        let leaderboard_misses = self.leaderboard_cache_misses.load(std::sync::atomic::Ordering::Relaxed);
+        let leaderboard_hit_rate = if leaderboard_hits + leaderboard_misses > 0 {
+            format!("{:.2}%", (leaderboard_hits as f64 / (leaderboard_hits + leaderboard_misses) as f64) * 100.0)
+        } else {
+            "0.00%".to_string()
+        };
+
+        serde_json::json!({
+            "bn_image_cache": {
+                "hits": bn_hits,
+                "misses": bn_misses,
+                "hit_rate": bn_hit_rate
+            },
+            "song_image_cache": {
+                "hits": song_hits,
+                "misses": song_misses,
+                "hit_rate": song_hit_rate
+            },
+            "leaderboard_image_cache": {
+                "hits": leaderboard_hits,
+                "misses": leaderboard_misses,
+                "hit_rate": leaderboard_hit_rate
+            }
+        })
     }
 }
