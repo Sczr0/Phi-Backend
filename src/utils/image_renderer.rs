@@ -976,15 +976,17 @@ pub fn generate_svg_string(
 // ... (render_svg_to_png function - unchanged) ...
 pub fn render_svg_to_png(svg_data: String) -> Result<Vec<u8>, AppError> {
     // 使用全局字体数据库
-    let _font_db = get_global_font_db();
+    let font_db = get_global_font_db(); // 获取字体数据库
 
     let opts = UsvgOptions {
         resources_dir: Some(
             std::env::current_dir()
                 .map_err(|e| AppError::InternalError(format!("Failed to get current dir: {e}")))?,
         ),
+        // 将加载的字体数据库放入 Options 中
+        fontdb: font_db,
         font_family: MAIN_FONT_NAME.to_string(),
-        font_size: 16.0, // Default font size, can be overridden by CSS
+        font_size: 16.0,
         languages: vec!["zh-CN".to_string(), "en".to_string()],
         shape_rendering: usvg::ShapeRendering::GeometricPrecision,
         text_rendering: usvg::TextRendering::OptimizeLegibility,
@@ -992,6 +994,7 @@ pub fn render_svg_to_png(svg_data: String) -> Result<Vec<u8>, AppError> {
         ..Default::default()
     };
 
+    // 现在调用 from_data 时，它会从 opts 中读取字体数据库
     let tree = usvg::Tree::from_data(svg_data.as_bytes(), &opts)
         .map_err(|e| AppError::InternalError(format!("Failed to parse SVG: {e}")))?;
 
