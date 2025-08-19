@@ -76,13 +76,10 @@ const SONG_ILLUST_ASPECT_RATIO: f64 = 1.0; // 假设单曲图的插画是方形�
 // 全局字体数据库单例
 static GLOBAL_FONT_DB: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
 
-// 背景图片 LRU 缓存
-static BACKGROUND_IMAGE_CACHE: OnceLock<std::sync::Mutex<LruCache<PathBuf, String>>> =
+// 背景图片 LRU 缓存和封面文件列表的组合结构
+static BACKGROUND_AND_COVER_CACHE: OnceLock<(std::sync::Mutex<LruCache<PathBuf, String>>, Vec<PathBuf>)> =
     OnceLock::new();
 const BACKGROUND_CACHE_SIZE: usize = 10; // 缓存10张背景图片
-
-// 封面图片路径列表
-static COVER_FILES: OnceLock<Vec<PathBuf>> = OnceLock::new();
 
 /// 初始化全局字体数据库
 fn init_global_font_db() -> Arc<fontdb::Database> {
@@ -117,6 +114,8 @@ pub fn get_global_font_db() -> Arc<fontdb::Database> {
 
 /// 初始化背景图片缓存和封面文件列表
 fn init_background_and_cover_cache() -> (std::sync::Mutex<LruCache<PathBuf, String>>, Vec<PathBuf>) {
+    log::info!("初始化背景图片缓存和封面文件列表");
+    
     // 初始化 LRU 缓存
     let cache = std::sync::Mutex::new(LruCache::new(
         NonZeroUsize::new(BACKGROUND_CACHE_SIZE).unwrap(),
@@ -162,17 +161,16 @@ fn init_background_and_cover_cache() -> (std::sync::Mutex<LruCache<PathBuf, Stri
             log::error!("读取背景目录失败 '{}': {}", background_base_path.display(), e);
         }
     }
+    
+    log::info!("初始化完成，共找到 {} 个封面文件", cover_files.len());
 
     (cache, cover_files)
 }
 
 /// 获取背景图片缓存和封面文件列表
 fn get_background_and_cover_cache() -> (&'static std::sync::Mutex<LruCache<PathBuf, String>>, &'static Vec<PathBuf>) {
-    let (cache, files) = init_background_and_cover_cache();
-    (
-        BACKGROUND_IMAGE_CACHE.get_or_init(|| cache),
-        COVER_FILES.get_or_init(|| files)
-    )
+    let (cache, files) = BACKGROUND_AND_COVER_CACHE.get_or_init(|| init_background_and_cover_cache());
+    ( &cache, &files )
 }
 
 /// 获取背景图片缓存

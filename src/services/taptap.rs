@@ -43,11 +43,12 @@ struct Account {
 fn mac(token: &TapTapToken) -> String {
     let ts: u64 = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .expect("系统时间早于UNIX纪元")
         .as_secs();
     let nonce: u32 = rand::rngs::SmallRng::seed_from_u64(ts).next_u32();
     let input: String = format!("{ts}\n{nonce}\nGET\n/account/basic-info/v1?client_id=rAK3FfdieFob2Nn8Am\nopen.tapapis.cn\n443\n\n");
-    let mut mac = hmac::Hmac::<sha1::Sha1>::new_from_slice(token.mac_key.as_bytes()).unwrap();
+    let mut mac = hmac::Hmac::<sha1::Sha1>::new_from_slice(token.mac_key.as_bytes())
+        .expect("无法创建HMAC实例");
     mac.update(input.as_bytes());
     let mac_string: String = BASE64_STANDARD.encode(mac.finalize().into_bytes());
     format!(
@@ -68,7 +69,7 @@ impl TapTapService {
                 .http1_title_case_headers()
                 .user_agent("TapTapUnitySDK/1.0 UnityPlayer/2021.3.40f1c1")
                 .build()
-                .unwrap(),
+                .expect("无法创建HTTP客户端"),
             leancloud_service: LeanCloudService::new(),
         }
     }

@@ -84,39 +84,24 @@ impl ImageService {
     ) -> Result<Vec<u8>, AppError> {
         let token = resolve_token(&identifier, &user_service).await?;
         
-        // 获取用户信息用于缓存键，确保用户数据变化时缓存失效
-        let (rks_save_res, profile_res) = tokio::join!(
-            phigros_service.get_rks(&token),
-            phigros_service.get_profile(&token)
-        );
+        // 获取存档校验和作为数据版本标识
+        let save_checksum = phigros_service.get_save_checksum(&token).await.unwrap_or_else(|_| "unknown".to_string());
         
-        let (_all_rks_result, save) = rks_save_res?;
-        let player_id = save
-            .user
-            .as_ref()
-            .and_then(|u| u.get("objectId"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string();
+        // 使用数据版本标识和参数作为缓存键，确保数据变化时缓存失效
+        let cache_key = (n, save_checksum.clone(), theme.clone());
         
-        let _player_nickname = profile_res.ok().map(|p| p.nickname).unwrap_or_default();
-        
-        // 使用更精确的缓存键，包括用户标识和n值以及主题
-        let cache_key = (n, player_id.clone(), theme.clone());
-        
-        // 尝试从缓存获取
+        // 先检查缓存中是否已存在
         if let Some(cached) = self.bn_image_cache.get(&cache_key).await {
+            // 记录真实的缓存命中
             self.bn_cache_hits.fetch_add(1, AtomicOrdering::Relaxed);
-            log::debug!("BN图片缓存命中: n={}, player={}", n, &player_id[..8]);
+            log::debug!("BN图片缓存命中: n={}, checksum={}", n, &save_checksum[..8]);
             return Ok(cached.to_vec());
         }
-        
-        self.bn_cache_misses.fetch_add(1, AtomicOrdering::Relaxed);
-        log::debug!("BN图片缓存未命中: n={}, player={}", n, &player_id[..8]);
 
         let image_bytes_arc = self
             .bn_image_cache
             .try_get_with(cache_key, async {
+                // 只在这里获取一次数据
                 let (rks_save_res, profile_res) = tokio::join!(
                     phigros_service.get_rks(&token),
                     phigros_service.get_profile(&token)
@@ -326,6 +311,10 @@ impl ImageService {
             .await
             .map_err(|e: Arc<AppError>| AppError::InternalError(e.to_string()))?;
 
+        // 记录缓存未命中（只有在try_get_with实际计算生成图片时才会执行到这里）
+        self.bn_cache_misses.fetch_add(1, AtomicOrdering::Relaxed);
+        log::debug!("BN图片缓存未命中: n={}, checksum={}", n, &save_checksum[..8]);
+        
         Ok(image_bytes_arc.to_vec())
     }
 
@@ -345,31 +334,19 @@ impl ImageService {
         let song_info = song_service.search_song(&song_query)?;
         let song_id = song_info.id.clone();
         
-        // 获取用户信息用于缓存键
-        let save_result = phigros_service.get_rks(&token).await;
-        let player_id = if let Ok((_, save)) = &save_result {
-            save.user
-                .as_ref()
-                .and_then(|u| u.get("objectId"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string()
-        } else {
-            "unknown".to_string()
-        };
+        // 获取存档校验和作为数据版本标识
+        let save_checksum = phigros_service.get_save_checksum(&token).await.unwrap_or_else(|_| "unknown".to_string());
         
-        // 使用更精确的缓存键，包括歌曲ID和用户标识
-        let cache_key = (song_id.clone(), player_id.clone());
+        // 使用数据版本标识和参数作为缓存键，确保数据变化时缓存失效
+        let cache_key = (song_id.clone(), save_checksum.clone());
         
-        // 尝试从缓存获取
+        // 先检查缓存中是否已存在
         if let Some(cached) = self.song_image_cache.get(&cache_key).await {
+            // 记录真实的缓存命中
             self.song_cache_hits.fetch_add(1, AtomicOrdering::Relaxed);
-            log::debug!("歌曲图片缓存命中: song_id={}, player={}", &song_id[..std::cmp::min(20, song_id.len())], &player_id[..8]);
+            log::debug!("歌曲图片缓存命中: song_id={}, checksum={}", &song_id[..std::cmp::min(20, song_id.len())], &save_checksum[..8]);
             return Ok(cached.to_vec());
         }
-        
-        self.song_cache_misses.fetch_add(1, AtomicOrdering::Relaxed);
-        log::debug!("歌曲图片缓存未命中: song_id={}, player={}", &song_id[..std::cmp::min(20, song_id.len())], &player_id[..8]);
 
         let image_bytes_arc = self
             .song_image_cache
@@ -378,6 +355,7 @@ impl ImageService {
                 let song_id = song_info.id.clone();
                 let song_name = song_info.song.clone();
 
+                // 只在这里获取一次数据
                 let (rks_save_res, profile_res) = tokio::join!(
                     phigros_service.get_rks(&token),
                     phigros_service.get_profile(&token)
@@ -507,7 +485,7 @@ impl ImageService {
 
                 let render_data = SongRenderData {
                     song_name,
-                    song_id,
+                    song_id: song_id.clone(),
                     player_name: player_nickname,
                     update_time: Utc::now(),
                     difficulty_scores: difficulty_scores_map,
@@ -527,6 +505,10 @@ impl ImageService {
             .await
             .map_err(|e: Arc<AppError>| AppError::InternalError(e.to_string()))?;
 
+        // 记录缓存未命中（只有在try_get_with实际计算生成图片时才会执行到这里）
+        self.song_cache_misses.fetch_add(1, AtomicOrdering::Relaxed);
+        log::debug!("歌曲图片缓存未命中: song_id={}, checksum={}", &song_id[..std::cmp::min(20, song_id.len())], &save_checksum[..8]);
+        
         Ok(image_bytes_arc.to_vec())
     }
 

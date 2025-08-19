@@ -41,6 +41,7 @@ impl PlayerArchiveService {
     /// - 使用 moka 缓存，自动处理过期。
     /// - 将多个数据库查询合并为一个，解决 N+1 问题。
     /// - 使用窗口函数在数据库端直接筛选历史记录。
+    /// - 合并推分ACC查询，解决数据不一致性问题。
     pub async fn get_player_archive(
         &self,
         player_id: &str,
@@ -53,7 +54,7 @@ impl PlayerArchiveService {
 
         log::debug!("缓存未命中，从数据库查询玩家[{player_id}]存档");
 
-        // 2. 核心查询：合并玩家信息、当前成绩和历史成绩
+        // 2. 核心查询：合并玩家信息、当前成绩、历史成绩和推分ACC
         let history_limit = self.config.history_max_records as i64;
         let query_sql = "
 WITH RankedScores AS (
@@ -79,9 +80,13 @@ SELECT
     rs.is_phi,
     rs.play_time,
     rs.is_current,
-    rs.history_rank
+    rs.history_rank,
+    pa_push.push_acc
 FROM player_archives pa
 LEFT JOIN RankedScores rs ON pa.player_id = rs.player_id
+LEFT JOIN push_acc pa_push ON pa.player_id = pa_push.player_id 
+    AND rs.song_id = pa_push.song_id 
+    AND rs.difficulty = pa_push.difficulty
 WHERE pa.player_id = ?1 AND (rs.is_current = 1 OR rs.history_rank <= ?2 OR rs.song_id IS NULL)
 ORDER BY rs.play_time DESC;
         ";
@@ -102,7 +107,18 @@ ORDER BY rs.play_time DESC;
         let first_row = &rows[0];
         // 如果第一个结果就没有 song_id，说明玩家存在但没有任何成绩
         if first_row.song_id.is_none() {
-            let push_acc_map = self.get_push_acc_map(player_id).await?;
+            // 从查询结果中构建 push_acc_map
+            let mut push_acc_map = HashMap::new();
+            if self.config.store_push_acc {
+                for row in &rows {
+                    if let (Some(song_id), Some(difficulty), Some(push_acc)) = 
+                        (&row.song_id, &row.difficulty, row.push_acc) {
+                        let key = format!("{}-{}", song_id, difficulty);
+                        push_acc_map.insert(key, push_acc);
+                    }
+                }
+            }
+            
             let archive = PlayerArchive {
                 player_id: first_row.player_id.clone(),
                 player_name: first_row.player_name.clone(),
@@ -111,7 +127,11 @@ ORDER BY rs.play_time DESC;
                 best_scores: HashMap::new(),
                 best_n_scores: Vec::new(),
                 chart_histories: HashMap::new(),
-                push_acc_map,
+                push_acc_map: if self.config.store_push_acc && !push_acc_map.is_empty() { 
+                    Some(push_acc_map) 
+                } else { 
+                    None 
+                },
             };
             let arc_archive = Arc::new(archive.clone());
             self.cache.insert(player_id.to_string(), arc_archive).await;
@@ -171,8 +191,17 @@ ORDER BY rs.play_time DESC;
         });
         all_current_scores.truncate(self.config.best_n_count as usize);
 
-        // 4. 单独获取推分ACC
-        let push_acc_map = self.get_push_acc_map(player_id).await?;
+        // 4. 从查询结果中构建 push_acc_map
+        let mut push_acc_map = HashMap::new();
+        if self.config.store_push_acc {
+            for row in &rows {
+                if let (Some(song_id), Some(difficulty), Some(push_acc)) = 
+                    (&row.song_id, &row.difficulty, row.push_acc) {
+                    let key = format!("{}-{}", song_id, difficulty);
+                    push_acc_map.insert(key, push_acc);
+                }
+            }
+        }
 
         let archive = PlayerArchive {
             player_id: first_row.player_id.clone(),
@@ -182,7 +211,11 @@ ORDER BY rs.play_time DESC;
             best_scores,
             best_n_scores: all_current_scores,
             chart_histories,
-            push_acc_map,
+            push_acc_map: if self.config.store_push_acc && !push_acc_map.is_empty() { 
+                Some(push_acc_map) 
+            } else { 
+                None 
+            },
         };
 
         // 5. 更新缓存
@@ -472,29 +505,23 @@ ORDER BY rs.play_time DESC;
         let push_acc_count = records_to_insert.len();
         if push_acc_count > 0 {
             log::debug!("批量插入 {push_acc_count} 条推分ACC记录...");
-            let update_time_str = Utc::now().to_rfc3339();
+            let update_time = Utc::now();
 
-            let mut sql = String::from("INSERT INTO push_acc (player_id, song_id, difficulty, push_acc, update_time) VALUES ");
-            let mut bindings: Vec<String> = Vec::new();
+            // 使用 sqlx::QueryBuilder 安全地构建批量插入语句
+            let mut query_builder = sqlx::QueryBuilder::new(
+                "INSERT INTO push_acc (player_id, song_id, difficulty, push_acc, update_time)"
+            );
+            
+            query_builder.push_values(records_to_insert.iter(), |mut b, (song_id, difficulty, push_acc)| {
+                b.push_bind(player_id)
+                    .push_bind(song_id)
+                    .push_bind(difficulty)
+                    .push_bind(push_acc)
+                    .push_bind(update_time);
+            });
 
-            for (i, (song_id, difficulty, push_acc)) in records_to_insert.iter().enumerate() {
-                if i > 0 {
-                    sql.push_str(", ");
-                }
-                sql.push_str("(?, ?, ?, ?, ?)");
-                bindings.push(player_id.to_string());
-                bindings.push(song_id.clone());
-                bindings.push(difficulty.clone());
-                bindings.push(push_acc.to_string());
-                bindings.push(update_time_str.clone());
-            }
-
-            let mut q = query(&sql);
-            for binding in &bindings {
-                q = q.bind(binding);
-            }
-
-            q.execute(&mut *tx)
+            let query = query_builder.build();
+            query.execute(&mut *tx)
                 .await
                 .map_err(|e| AppError::DatabaseError(format!("批量插入推分ACC失败: {e}")))?;
         }
@@ -633,4 +660,6 @@ struct CombinedScoreRecord {
     play_time: Option<DateTime<Utc>>,
     is_current: Option<i32>,
     history_rank: Option<i64>,
+    // 推分ACC (由于是LEFT JOIN, 可能为NULL)
+    push_acc: Option<f64>,
 }

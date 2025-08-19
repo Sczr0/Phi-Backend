@@ -41,7 +41,7 @@ pub fn encrypt(data: &[u8]) -> AppResult<Vec<u8>> {
     Ok(result)
 }
 
-// --- 3解密函数 ---
+// --- 3 解密函数 ---
 pub fn decrypt(data: &[u8]) -> AppResult<Vec<u8>> {
     // 同样，直接使用静态 KEY 和 IV
     let cipher = Decryptor::<Aes256>::new_from_slices(&*AES_KEY, &*AES_IV)

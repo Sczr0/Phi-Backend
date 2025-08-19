@@ -1,6 +1,5 @@
 use base64::{engine::general_purpose, Engine as _};
 use byteorder::{LittleEndian, ReadBytesExt};
-use rayon::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
@@ -235,14 +234,15 @@ impl<'a> BinaryReader<'a> {
                 }
             }
 
+            // 检查指针位置是否正确，但不再强制修正
             if self.position() != record_end_pos {
                 log::warn!(
-                    "GameRecord: 解析歌曲 {} 后指针位置 ({}) 与预期 ({}) 不符，强制修正",
+                    "GameRecord: 解析歌曲 {} 后指针位置 ({}) 与预期 ({}) 不符，可能存在解析错误",
                     song_id,
                     self.position(),
                     record_end_pos
                 );
-                self.cursor.set_position(record_end_pos);
+                // 不再强制修正指针位置，让错误自然暴露以便调试
             }
 
             if !difficulties.is_empty() {
@@ -729,12 +729,12 @@ pub fn calculate_b30(save: &GameSave) -> AppResult<B30Result> {
         .ok_or_else(|| AppError::Other("没有游戏记录数据".to_string()))?;
     log::debug!("B30: 获取到 GameRecord，包含 {} 首歌曲", game_record.len());
 
-    log::debug!("B30: 开始并行收集有效成绩记录...");
+    log::debug!("B30: 开始收集有效成绩记录...");
     let mut all_played_records: Vec<B30Record> = game_record
-        .par_iter()
+        .iter() // 改为串行迭代，避免并行开销
         .flat_map(|(song_id, difficulties)| {
             difficulties
-                .par_iter()
+                .iter() // 改为串行迭代
                 .filter_map(|(diff_name, record)| {
                     if let (Some(acc), Some(difficulty)) = (record.acc, record.difficulty) {
                         if acc >= 70.0 && difficulty > 0.0 {
