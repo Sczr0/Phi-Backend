@@ -77,9 +77,10 @@ const SONG_ILLUST_ASPECT_RATIO: f64 = 1.0; // 假设单曲图的插画是方形�
 static GLOBAL_FONT_DB: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
 
 // 背景图片 LRU 缓存和封面文件列表的组合结构
-static BACKGROUND_AND_COVER_CACHE: OnceLock<(std::sync::Mutex<LruCache<PathBuf, String>>, Vec<PathBuf>)> =
-    OnceLock::new();
+static BACKGROUND_AND_COVER_CACHE: OnceLock<(std::sync::Mutex<LruCache<PathBuf, String>>, Vec<PathBuf>, std::sync::Mutex<HashMap<String, String>>)>
+    = OnceLock::new();
 const BACKGROUND_CACHE_SIZE: usize = 10; // 缓存10张背景图片
+const COVER_METADATA_CACHE_SIZE: usize = 10000; // 缓存封面元数据
 
 /// 初始化全局字体数据库
 fn init_global_font_db() -> Arc<fontdb::Database> {
@@ -113,17 +114,20 @@ pub fn get_global_font_db() -> Arc<fontdb::Database> {
 }
 
 /// 初始化背景图片缓存和封面文件列表
-fn init_background_and_cover_cache() -> (std::sync::Mutex<LruCache<PathBuf, String>>, Vec<PathBuf>) {
+fn init_background_and_cover_cache() -> (std::sync::Mutex<LruCache<PathBuf, String>>, Vec<PathBuf>, std::sync::Mutex<HashMap<String, String>>) {
     log::info!("初始化背景图片缓存和封面文件列表");
-    
+
     // 初始化 LRU 缓存
     let cache = std::sync::Mutex::new(LruCache::new(
         NonZeroUsize::new(BACKGROUND_CACHE_SIZE).unwrap(),
     ));
 
+    // 初始化封面元数据缓存
+    let metadata_cache = std::sync::Mutex::new(HashMap::<String, String>::with_capacity(COVER_METADATA_CACHE_SIZE));
+
     // 读取封面目录下的所有图片文件（包括 ill 和 illBlur 目录）
     let mut cover_files = Vec::new();
-    
+
     // 读取 ill 目录
     let cover_base_path = PathBuf::from(cover_loader::COVERS_DIR).join("ill");
     match fs::read_dir(&cover_base_path) {
@@ -142,7 +146,7 @@ fn init_background_and_cover_cache() -> (std::sync::Mutex<LruCache<PathBuf, Stri
             log::error!("读取封面目录失败 '{}': {}", cover_base_path.display(), e);
         }
     }
-    
+
     // 读取 illBlur 目录（背景图片）
     let background_base_path = PathBuf::from(cover_loader::COVERS_DIR).join("illBlur");
     match fs::read_dir(&background_base_path) {
@@ -161,28 +165,44 @@ fn init_background_and_cover_cache() -> (std::sync::Mutex<LruCache<PathBuf, Stri
             log::error!("读取背景目录失败 '{}': {}", background_base_path.display(), e);
         }
     }
-    
+
     log::info!("初始化完成，共找到 {} 个封面文件", cover_files.len());
 
-    (cache, cover_files)
+    // 预构建封面元数据，避免运行时文件系统调用
+    let mut metadata_map = HashMap::new();
+    for cover_path in &cover_files {
+        if let Some(song_id) = cover_path.file_name().and_then(|name| name.to_str()) {
+            if let Some(song_id) = song_id.split('.').next() {
+                metadata_map.insert(song_id.to_string(), cover_path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    (cache, cover_files, std::sync::Mutex::new(metadata_map))
 }
 
 /// 获取背景图片缓存和封面文件列表
-fn get_background_and_cover_cache() -> (&'static std::sync::Mutex<LruCache<PathBuf, String>>, &'static Vec<PathBuf>) {
-    let (cache, files) = BACKGROUND_AND_COVER_CACHE.get_or_init(|| init_background_and_cover_cache());
-    ( &cache, &files )
+fn get_background_and_cover_cache() -> (&'static std::sync::Mutex<LruCache<PathBuf, String>>, &'static Vec<PathBuf>, &'static std::sync::Mutex<HashMap<String, String>>) {
+    let (cache, files, metadata) = BACKGROUND_AND_COVER_CACHE.get_or_init(|| init_background_and_cover_cache());
+    ( &cache, &files, &metadata )
 }
 
 /// 获取背景图片缓存
 pub fn get_background_cache() -> &'static std::sync::Mutex<LruCache<PathBuf, String>> {
-    let (cache, _) = get_background_and_cover_cache();
+    let (cache, _, _) = get_background_and_cover_cache();
     cache
 }
 
 /// 获取封面文件列表
 pub fn get_cover_files() -> &'static Vec<PathBuf> {
-    let (_, files) = get_background_and_cover_cache();
+    let (_, files, _) = get_background_and_cover_cache();
     files
+}
+
+/// 获取封面元数据缓存
+pub fn get_cover_metadata_cache() -> &'static std::sync::Mutex<HashMap<String, String>> {
+    let (_, _, metadata) = get_background_and_cover_cache();
+    metadata
 }
 
 /// 从缓存或磁盘加载背景图片
@@ -204,8 +224,11 @@ fn get_background_image(path: &PathBuf) -> Option<String> {
         let base64_encoded = base64_engine.encode(&data);
         let image_data = format!("data:{mime_type};base64,{base64_encoded}");
 
-        // 放入缓存
-        cache.put(path.clone(), image_data.clone());
+        // 放入缓存，但限制单个文件大小
+        let file_size = data.len();
+        if file_size <= 1024 * 1024 { // 限制1MB以内
+            cache.put(path.clone(), image_data.clone());
+        }
 
         return Some(image_data);
     }
@@ -292,66 +315,56 @@ fn generate_card_svg(info: CardRenderInfo) -> Result<(), AppError> {
     writeln!(svg, "<defs><clipPath id=\"{clip_path_id}\"><rect x=\"{cover_x}\" y=\"{cover_y}\" width=\"{cover_size_w:.1}\" height=\"{cover_size_h:.1}\" rx=\"4\" ry=\"4\" /></clipPath></defs>").map_err(fmt_err)?;
 
     // Cover Image or Placeholder
-    // 预先获取封面文件列表以减少文件系统调用
-    let cover_files = get_cover_files();
-    let cover_path_png = PathBuf::from(cover_loader::COVERS_DIR)
-        .join("illLow")
-        .join(format!("{}.png", score.song_id));
-    let cover_path_jpg = PathBuf::from(cover_loader::COVERS_DIR)
-        .join("illLow")
-        .join(format!("{}.jpg", score.song_id));
-    
-    let cover_href = if cover_files.contains(&cover_path_png) {
-        cover_path_png
-            .canonicalize()
-            .ok()
-            .map(|p| p.to_string_lossy().into_owned())
-    } else if cover_files.contains(&cover_path_jpg) {
-        cover_path_jpg
-            .canonicalize()
-            .ok()
-            .map(|p| p.to_string_lossy().into_owned())
-    } else {
-        None
-    };
-    
+    // 使用预构建的封面元数据缓存，避免运行时文件系统调用
+    let metadata_cache = get_cover_metadata_cache();
+    let cover_href = metadata_cache.lock().unwrap()
+        .get(&score.song_id)
+        .cloned()
+        .or_else(|| {
+            // 回退检查：尝试从缓存文件列表中查找
+            let cover_files = get_cover_files();
+            let cover_path_low_png = PathBuf::from(cover_loader::COVERS_DIR)
+                .join("illLow")
+                .join(format!("{}.png", score.song_id));
+            let cover_path_low_jpg = PathBuf::from(cover_loader::COVERS_DIR)
+                .join("illLow")
+                .join(format!("{}.jpg", score.song_id));
+            let cover_path_std_png = PathBuf::from(cover_loader::COVERS_DIR)
+                .join("ill")
+                .join(format!("{}.png", score.song_id));
+            let cover_path_std_jpg = PathBuf::from(cover_loader::COVERS_DIR)
+                .join("ill")
+                .join(format!("{}.jpg", score.song_id));
+
+            if cover_files.contains(&cover_path_low_png) {
+                cover_path_low_png
+                    .canonicalize()
+                    .ok()
+                    .map(|p| p.to_string_lossy().into_owned())
+            } else if cover_files.contains(&cover_path_low_jpg) {
+                cover_path_low_jpg
+                    .canonicalize()
+                    .ok()
+                    .map(|p| p.to_string_lossy().into_owned())
+            } else if cover_files.contains(&cover_path_std_png) {
+                cover_path_std_png
+                    .canonicalize()
+                    .ok()
+                    .map(|p| p.to_string_lossy().into_owned())
+            } else if cover_files.contains(&cover_path_std_jpg) {
+                cover_path_std_jpg
+                    .canonicalize()
+                    .ok()
+                    .map(|p| p.to_string_lossy().into_owned())
+            } else {
+                None
+            }
+        });
+
     if let Some(href) = cover_href {
         let escaped_href = escape_xml(&href);
         writeln!(svg, r#"<image href="{escaped_href}" x="{cover_x}" y="{cover_y}" width="{cover_size_w:.1}" height="{cover_size_h:.1}" clip-path="url(#{clip_path_id})" />"#).map_err(fmt_err)?;
-    } else {
-        // 如果找不到低质量封面，尝试使用标准质量封面
-        let cover_path_std_png = PathBuf::from(cover_loader::COVERS_DIR)
-            .join("ill")
-            .join(format!("{}.png", score.song_id));
-        let cover_path_std_jpg = PathBuf::from(cover_loader::COVERS_DIR)
-            .join("ill")
-            .join(format!("{}.jpg", score.song_id));
-            
-        let cover_href_std = if cover_files.contains(&cover_path_std_png) {
-            cover_path_std_png
-                .canonicalize()
-                .ok()
-                .map(|p| p.to_string_lossy().into_owned())
-        } else if cover_files.contains(&cover_path_std_jpg) {
-            cover_path_std_jpg
-                .canonicalize()
-                .ok()
-                .map(|p| p.to_string_lossy().into_owned())
-        } else {
-            None
-        };
-        
-        if let Some(href_std) = cover_href_std {
-            let escaped_href_std = escape_xml(&href_std);
-            writeln!(svg, r#"<image href="{escaped_href_std}" x="{cover_x}" y="{cover_y}" width="{cover_size_w:.1}" height="{cover_size_h:.1}" clip-path="url(#{clip_path_id})" />"#).map_err(fmt_err)?;
-        } else {
-            // 如果仍然找不到封面，使用占位符
-            let placeholder_color = match theme {
-                crate::controllers::image::Theme::White => "#DDD",
-                crate::controllers::image::Theme::Black => "#333",
-            };
-            writeln!(svg, "<rect x='{cover_x}' y='{cover_y}' width='{cover_size_w:.1}' height='{cover_size_h:.1}' fill='{placeholder_color}' rx='4' ry='4'/>").map_err(fmt_err)?;
-        }
+    // 不需要额外处理，上面的 or_else 已经涵盖了所有情况
     }
 
     // Text content positioning
@@ -650,7 +663,7 @@ pub fn generate_svg_string(
         .iter()
         .filter(|path| {
             // 检查路径是否在 illBlur 目录下且是图片文件
-            path.starts_with(&background_base_path) && 
+            path.starts_with(&background_base_path) &&
             (path.extension() == Some("png".as_ref()) || path.extension() == Some("jpg".as_ref()))
         })
         .collect();
@@ -1142,7 +1155,7 @@ pub fn generate_song_svg_string(data: &SongRenderData) -> Result<String, AppErro
     // --- 获取随机背景图 ---
     let mut background_image_href = None;
     let cover_files = get_cover_files();
-    
+
     // 优先尝试使用当前曲目的曲绘作为背景
     let current_song_ill_path_png = PathBuf::from(cover_loader::COVERS_DIR)
         .join("ill")

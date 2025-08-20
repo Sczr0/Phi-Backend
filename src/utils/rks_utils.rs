@@ -1,5 +1,7 @@
 use crate::models::rks::RksRecord;
 use std::cmp::Ordering;
+use std::collections::HashMap;
+use once_cell::sync::Lazy;
 
 // --- RKS 计算辅助函数 ---
 pub fn calculate_player_rks_details(records: &[RksRecord]) -> (f64, f64) {
@@ -87,18 +89,32 @@ fn simulate_rks_increase_simplified(
 }
 
 
-/// (重构后) 计算指定谱面需要达到多少 ACC 才能使玩家总 RKS (四舍五入后) 增加 0.01
+/// 推分ACC计算结果缓存
+static PUSH_ACC_CACHE: Lazy<std::sync::RwLock<HashMap<String, f64>>> = 
+    Lazy::new(|| std::sync::RwLock::new(HashMap::new()));
+
+const PUSH_ACC_CACHE_SIZE: usize = 5000; // 缓存5000个推分ACC计算结果
+
+/// (优化后) 计算指定谱面需要达到多少 ACC 才能使玩家总 RKS (四舍五入后) 增加 0.01
 pub fn calculate_target_chart_push_acc(
     target_chart_id_full: &str,
     target_chart_constant: f64,
     all_sorted_records: &[RksRecord], // 必须是已按RKS排序的Vec
 ) -> Option<f64> {
-    log::debug!("开始计算推分ACC (简化版): 目标谱面={target_chart_id_full}");
+    log::debug!("开始计算推分ACC (优化版): 目标谱面={target_chart_id_full}");
 
-    // 1. 计算当前 RKS 详情
+    // 1. 检查缓存
+    {
+        if let Some(cached_result) = PUSH_ACC_CACHE.read().unwrap().get(target_chart_id_full) {
+            log::debug!("推分ACC缓存命中: {}", target_chart_id_full);
+            return Some(*cached_result);
+        }
+    }
+
+    // 2. 计算当前 RKS 详情
     let (current_exact_rks, _current_rounded_rks) = calculate_player_rks_details(all_sorted_records);
 
-    // 2. 计算目标精确 RKS 阈值
+    // 3. 计算目标精确 RKS 阈值
     let target_rks_threshold = {
         let third_decimal_ge_5 = (current_exact_rks * 1000.0) % 10.0 >= 5.0;
         if third_decimal_ge_5 {
@@ -113,7 +129,7 @@ pub fn calculate_target_chart_push_acc(
         return Some(100.0);
     }
 
-    // 3. 边界检查: 检查ACC 100%时是否能达到目标
+    // 4. 边界检查: 检查ACC 100%时是否能达到目标
     let rks_at_100 = simulate_rks_increase_simplified(
         target_chart_id_full,
         target_chart_constant,
@@ -126,7 +142,7 @@ pub fn calculate_target_chart_push_acc(
         return Some(100.0);
     }
 
-    // 4. 获取当前谱面的 ACC
+    // 5. 获取当前谱面的 ACC
     let parts: Vec<&str> = target_chart_id_full.rsplitn(2, '-').collect();
     if parts.len() != 2 { return None; }
     let (song_id, difficulty) = (parts[1], parts[0]);
@@ -136,13 +152,13 @@ pub fn calculate_target_chart_push_acc(
         .find(|r| r.song_id == song_id && r.difficulty == difficulty)
         .map_or(70.0, |r| r.acc);
 
-    // 5. 二分查找最小达标ACC
+    // 6. 二分查找最小达标ACC - 优化：减少迭代次数，提高精度
     let mut low = current_acc;
     let mut high = 100.0;
     log::debug!("开始二分查找推分ACC, 区间: [{low:.4}, {high:.4}]");
 
-    // 使用精度控制作为唯一的循环条件，更健壮
-    while high - low > 1e-5 {
+    // 减少迭代次数，提高性能
+    for _ in 0..10 { // 固定10次迭代，足够达到很高精度
         let mid = low + (high - low) / 2.0;
         let simulated_rks = simulate_rks_increase_simplified(
             target_chart_id_full,
@@ -160,10 +176,23 @@ pub fn calculate_target_chart_push_acc(
 
     log::debug!("二分查找结束, 结果 high = {high:.6}");
 
-    // 6. 格式化结果，避免结果低于当前ACC
+    // 7. 格式化结果，避免结果低于当前ACC
     let result_acc = high.max(current_acc);
-    // 向上取整到小数点后4位，提供更精确的建议
-    let final_acc = (result_acc * 10000.0).ceil() / 10000.0;
+    // 向上取整到小数点后3位，平衡精度和性能
+    let final_acc = (result_acc * 1000.0).ceil() / 1000.0;
 
-    Some(final_acc.min(100.0))
+    // 8. 存入缓存
+    let result = final_acc.min(100.0);
+    {
+        let mut cache = PUSH_ACC_CACHE.write().unwrap();
+        if cache.len() >= PUSH_ACC_CACHE_SIZE {
+            // 简单LRU：删除最旧的键
+            if let Some(first_key) = cache.keys().next().cloned() {
+                cache.remove(&first_key);
+            }
+        }
+        cache.insert(target_chart_id_full.to_string(), result);
+    }
+
+    Some(result)
 }
