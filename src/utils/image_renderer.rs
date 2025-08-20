@@ -77,8 +77,8 @@ const SONG_ILLUST_ASPECT_RATIO: f64 = 1.0; // 假设单曲图的插画是方形�
 static GLOBAL_FONT_DB: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
 
 // 背景图片 LRU 缓存和封面文件列表的组合结构
-static BACKGROUND_AND_COVER_CACHE: OnceLock<(std::sync::Mutex<LruCache<PathBuf, String>>, Vec<PathBuf>, std::sync::Mutex<HashMap<String, String>>)>
-    = OnceLock::new();
+type BackgroundAndCoverCache = (std::sync::Mutex<LruCache<PathBuf, String>>, Vec<PathBuf>, std::sync::Mutex<HashMap<String, String>>);
+static BACKGROUND_AND_COVER_CACHE: OnceLock<BackgroundAndCoverCache> = OnceLock::new();
 const BACKGROUND_CACHE_SIZE: usize = 10; // 缓存10张背景图片
 const COVER_METADATA_CACHE_SIZE: usize = 10000; // 缓存封面元数据
 
@@ -114,7 +114,7 @@ pub fn get_global_font_db() -> Arc<fontdb::Database> {
 }
 
 /// 初始化背景图片缓存和封面文件列表
-fn init_background_and_cover_cache() -> (std::sync::Mutex<LruCache<PathBuf, String>>, Vec<PathBuf>, std::sync::Mutex<HashMap<String, String>>) {
+fn init_background_and_cover_cache() -> BackgroundAndCoverCache {
     log::info!("初始化背景图片缓存和封面文件列表");
 
     // 初始化 LRU 缓存
@@ -123,7 +123,7 @@ fn init_background_and_cover_cache() -> (std::sync::Mutex<LruCache<PathBuf, Stri
     ));
 
     // 初始化封面元数据缓存
-    let metadata_cache = std::sync::Mutex::new(HashMap::<String, String>::with_capacity(COVER_METADATA_CACHE_SIZE));
+    let _metadata_cache = std::sync::Mutex::new(HashMap::<String, String>::with_capacity(COVER_METADATA_CACHE_SIZE));
 
     // 读取封面目录下的所有图片文件（包括 ill 和 illBlur 目录）
     let mut cover_files = Vec::new();
@@ -183,8 +183,8 @@ fn init_background_and_cover_cache() -> (std::sync::Mutex<LruCache<PathBuf, Stri
 
 /// 获取背景图片缓存和封面文件列表
 fn get_background_and_cover_cache() -> (&'static std::sync::Mutex<LruCache<PathBuf, String>>, &'static Vec<PathBuf>, &'static std::sync::Mutex<HashMap<String, String>>) {
-    let (cache, files, metadata) = BACKGROUND_AND_COVER_CACHE.get_or_init(|| init_background_and_cover_cache());
-    ( &cache, &files, &metadata )
+    let (cache, files, metadata) = BACKGROUND_AND_COVER_CACHE.get_or_init(init_background_and_cover_cache);
+    (cache, files, metadata)
 }
 
 /// 获取背景图片缓存
@@ -964,7 +964,7 @@ pub fn generate_svg_string(
                 pre_calculated_push_acc: push_acc,
                 all_sorted_records: scores,
                 theme,
-            })?;
+            })?
         }
         writeln!(svg, r#"</g>"#).map_err(fmt_err)?;
     }
@@ -998,7 +998,7 @@ pub fn generate_svg_string(
             pre_calculated_push_acc: push_acc,
             all_sorted_records: scores,
             theme,
-        })?;
+        })?
     }
 
     // --- Footer ---

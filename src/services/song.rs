@@ -125,7 +125,7 @@ impl SongService {
 
         // 7. 如果未找到，则返回错误
         log::info!("找不到匹配查询 '{query}' 的歌曲");
-        return Err(AppError::SongNotFound(query.to_string()));
+        Err(AppError::SongNotFound(query.to_string()))
     }
 
     // 根据统一查询找ID

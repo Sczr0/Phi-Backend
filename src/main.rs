@@ -1,7 +1,6 @@
 use actix_cors::Cors;
 use actix_web::{middleware, web, App, HttpServer};
 use env_logger::Env;
-use serde_json;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::env;
 use std::str::FromStr;

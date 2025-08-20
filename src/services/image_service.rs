@@ -341,7 +341,7 @@ impl ImageService {
         
         // 增加计数器
         if let Err(e) = self.increment_counter("bn").await {
-            log::error!("更新BN图片计数器失败: {}", e);
+            log::error!("更新BN图片计数器失败: {e}");
         }
         
         Ok(image_bytes_arc.to_vec())
@@ -540,7 +540,7 @@ impl ImageService {
         
         // 增加计数器
         if let Err(e) = self.increment_counter("song").await {
-            log::error!("更新歌曲图片计数器失败: {}", e);
+            log::error!("更新歌曲图片计数器失败: {e}");
         }
         
         Ok(image_bytes_arc.to_vec())
@@ -608,7 +608,7 @@ impl ImageService {
 
         // 增加计数器
         if let Err(e) = self.increment_counter("leaderboard").await {
-            log::error!("更新排行榜图片计数器失败: {}", e);
+            log::error!("更新排行榜图片计数器失败: {e}");
         }
 
         Ok(image_bytes_arc.to_vec())

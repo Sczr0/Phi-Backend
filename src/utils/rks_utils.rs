@@ -106,7 +106,7 @@ pub fn calculate_target_chart_push_acc(
     // 1. 检查缓存
     {
         if let Some(cached_result) = PUSH_ACC_CACHE.read().unwrap().get(target_chart_id_full) {
-            log::debug!("推分ACC缓存命中: {}", target_chart_id_full);
+            log::debug!("推分ACC缓存命中: {target_chart_id_full}");
             return Some(*cached_result);
         }
     }

@@ -119,7 +119,7 @@ ORDER BY rs.play_time DESC;
                 for row in &rows {
                     if let (Some(song_id), Some(difficulty), Some(push_acc)) = 
                         (&row.song_id, &row.difficulty, row.push_acc) {
-                        let key = format!("{}-{}", song_id, difficulty);
+                        let key = format!("{song_id}-{difficulty}");
                         push_acc_map.insert(key, push_acc);
                     }
                 }
@@ -203,7 +203,7 @@ ORDER BY rs.play_time DESC;
             for row in &rows {
                 if let (Some(song_id), Some(difficulty), Some(push_acc)) = 
                     (&row.song_id, &row.difficulty, row.push_acc) {
-                    let key = format!("{}-{}", song_id, difficulty);
+                    let key = format!("{song_id}-{difficulty}");
                     push_acc_map.insert(key, push_acc);
                 }
             }
@@ -310,7 +310,7 @@ ORDER BY rs.play_time DESC;
         &self,
         player_id: &str,
         player_name: &str,
-        rks_records: &Vec<RksRecord>,
+        rks_records: &[RksRecord],
         fc_map: &HashMap<String, bool>,
     ) -> Result<(), AppError> {
         log::info!(
@@ -616,6 +616,7 @@ ORDER BY rs.play_time DESC;
     }
 
     /// 辅助函数：获取推分ACC
+    #[allow(dead_code)]
     async fn get_push_acc_map(
         &self,
         player_id: &str,

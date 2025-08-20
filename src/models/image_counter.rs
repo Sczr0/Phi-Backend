@@ -10,6 +10,7 @@ pub struct ImageCounter {
 }
 
 impl ImageCounter {
+    #[allow(dead_code)]
     pub fn new(image_type: String, count: i64) -> Self {
         Self {
             id: None,
