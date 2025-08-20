@@ -19,6 +19,9 @@ Thumbs.db
 # Claude Code 生成的文件
 CLAUDE.md
 
+# Qwen Code 生成的文件
+QWEN.md
+
 # 重构相关
 /phi-backend-service/
 /重构/
@@ -28,6 +31,7 @@ REFACTORING_PLAN.md
 test.html
 test.md
 phi-backend-rust.exe
+/c/
 
 # 前端构建产物
 /html/

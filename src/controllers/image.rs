@@ -1,5 +1,6 @@
 use actix_web::{get, post, web, HttpResponse, Result};
 use serde::Deserialize;
+use serde_json::json;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::models::user::IdentifierRequest;
@@ -164,4 +165,63 @@ pub async fn get_cache_stats(
 ) -> Result<HttpResponse, AppError> {
     let stats = image_service.get_cache_stats();
     Ok(HttpResponse::Ok().json(stats))
+}
+
+/// 获取图片生成统计信息
+///
+/// 返回图片生成的统计信息，包括各类型图片的生成次数。
+#[utoipa::path(
+    get,
+    path = "/stats",
+    responses(
+        (status = 200, description = "成功获取图片生成统计信息", body = serde_json::Value)
+    )
+)]
+#[get("/stats")]
+pub async fn get_image_stats(
+    image_service: web::Data<ImageService>,
+) -> Result<HttpResponse, AppError> {
+    let stats = image_service.get_image_stats().await?;
+    Ok(HttpResponse::Ok().json(stats))
+}
+
+/// 获取指定类型的图片生成统计信息
+///
+/// 返回指定类型图片的生成统计信息。
+#[utoipa::path(
+    get,
+    path = "/stats/{image_type}",
+    params(
+        ("image_type" = String, Path, description = "图片类型 (bn, song, leaderboard)")
+    ),
+    responses(
+        (status = 200, description = "成功获取指定类型的图片生成统计信息", body = serde_json::Value)
+    )
+)]
+#[get("/stats/{image_type}")]
+pub async fn get_image_stats_by_type(
+    path: web::Path<String>,
+    image_service: web::Data<ImageService>,
+) -> Result<HttpResponse, AppError> {
+    let image_type = path.into_inner();
+    let valid_types = ["bn", "song", "leaderboard"];
+    
+    if !valid_types.contains(&image_type.as_str()) {
+        return Err(AppError::BadRequest(format!("无效的图片类型 '{}'. 有效类型: {}", image_type, valid_types.join(", "))));
+    }
+    
+    let stats = image_service.get_image_stats_by_type(&image_type).await?;
+    
+    match stats {
+        Some(counter) => Ok(HttpResponse::Ok().json(json!({
+            "type": counter.image_type,
+            "count": counter.count,
+            "last_updated": counter.last_updated
+        }))),
+        None => Ok(HttpResponse::Ok().json(json!({
+            "type": image_type,
+            "count": 0,
+            "last_updated": "never"
+        })))
+    }
 }

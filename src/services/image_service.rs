@@ -36,6 +36,8 @@ pub struct ImageService {
     song_cache_misses: AtomicU64,
     leaderboard_cache_hits: AtomicU64,
     leaderboard_cache_misses: AtomicU64,
+    // 数据库连接池，用于持久化计数器
+    db_pool: Option<sqlx::SqlitePool>,
 }
 
 impl ImageService {
@@ -66,7 +68,14 @@ impl ImageService {
             song_cache_misses: AtomicU64::new(0),
             leaderboard_cache_hits: AtomicU64::new(0),
             leaderboard_cache_misses: AtomicU64::new(0),
+            // 数据库连接池初始化为 None，需要在创建服务时设置
+            db_pool: None,
         }
+    }
+    
+    pub fn with_db_pool(mut self, pool: sqlx::SqlitePool) -> Self {
+        self.db_pool = Some(pool);
+        self
     }
 }
 
@@ -315,6 +324,11 @@ impl ImageService {
         self.bn_cache_misses.fetch_add(1, AtomicOrdering::Relaxed);
         log::debug!("BN图片缓存未命中: n={}, checksum={}", n, &save_checksum[..8]);
         
+        // 增加计数器
+        if let Err(e) = self.increment_counter("bn").await {
+            log::error!("更新BN图片计数器失败: {}", e);
+        }
+        
         Ok(image_bytes_arc.to_vec())
     }
 
@@ -509,6 +523,11 @@ impl ImageService {
         self.song_cache_misses.fetch_add(1, AtomicOrdering::Relaxed);
         log::debug!("歌曲图片缓存未命中: song_id={}, checksum={}", &song_id[..std::cmp::min(20, song_id.len())], &save_checksum[..8]);
         
+        // 增加计数器
+        if let Err(e) = self.increment_counter("song").await {
+            log::error!("更新歌曲图片计数器失败: {}", e);
+        }
+        
         Ok(image_bytes_arc.to_vec())
     }
 
@@ -572,6 +591,11 @@ impl ImageService {
             .await
             .map_err(|e: Arc<AppError>| AppError::InternalError(e.to_string()))?;
 
+        // 增加计数器
+        if let Err(e) = self.increment_counter("leaderboard").await {
+            log::error!("更新排行榜图片计数器失败: {}", e);
+        }
+
         Ok(image_bytes_arc.to_vec())
     }
 }
@@ -620,5 +644,62 @@ impl ImageService {
                 "hit_rate": leaderboard_hit_rate
             }
         })
+    }
+    
+    // 增加图片生成计数
+    async fn increment_counter(&self, image_type: &str) -> Result<(), AppError> {
+        if let Some(ref pool) = self.db_pool {
+            sqlx::query!(
+                "UPDATE image_counter SET count = count + 1, last_updated = datetime('now') WHERE image_type = ?",
+                image_type
+            )
+            .execute(pool)
+            .await
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+        }
+        Ok(())
+    }
+    
+    // 获取所有计数器统计信息
+    pub async fn get_image_stats(&self) -> Result<serde_json::Value, AppError> {
+        if let Some(ref pool) = self.db_pool {
+            let counters = sqlx::query_as!(crate::models::image_counter::ImageCounter,
+                "SELECT id, image_type, count, last_updated FROM image_counter"
+            )
+            .fetch_all(pool)
+            .await
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+            
+            let mut stats = serde_json::Map::new();
+            for counter in counters {
+                stats.insert(counter.image_type, serde_json::json!({
+                    "count": counter.count,
+                    "last_updated": counter.last_updated
+                }));
+            }
+            
+            Ok(serde_json::Value::Object(stats))
+        } else {
+            // 如果没有数据库连接，返回空对象
+            Ok(serde_json::json!({}))
+        }
+    }
+    
+    // 获取特定类型的计数器统计信息
+    pub async fn get_image_stats_by_type(&self, image_type: &str) -> Result<Option<crate::models::image_counter::ImageCounter>, AppError> {
+        if let Some(ref pool) = self.db_pool {
+            let counter = sqlx::query_as!(crate::models::image_counter::ImageCounter,
+                "SELECT id, image_type, count, last_updated FROM image_counter WHERE image_type = ?",
+                image_type
+            )
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+            
+            Ok(counter)
+        } else {
+            // 如果没有数据库连接，返回 None
+            Ok(None)
+        }
     }
 }

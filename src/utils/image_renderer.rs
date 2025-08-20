@@ -314,15 +314,44 @@ fn generate_card_svg(info: CardRenderInfo) -> Result<(), AppError> {
     } else {
         None
     };
+    
     if let Some(href) = cover_href {
         let escaped_href = escape_xml(&href);
         writeln!(svg, r#"<image href="{escaped_href}" x="{cover_x}" y="{cover_y}" width="{cover_size_w:.1}" height="{cover_size_h:.1}" clip-path="url(#{clip_path_id})" />"#).map_err(fmt_err)?;
     } else {
-        let placeholder_color = match theme {
-            crate::controllers::image::Theme::White => "#DDD",
-            crate::controllers::image::Theme::Black => "#333",
+        // 如果找不到低质量封面，尝试使用标准质量封面
+        let cover_path_std_png = PathBuf::from(cover_loader::COVERS_DIR)
+            .join("ill")
+            .join(format!("{}.png", score.song_id));
+        let cover_path_std_jpg = PathBuf::from(cover_loader::COVERS_DIR)
+            .join("ill")
+            .join(format!("{}.jpg", score.song_id));
+            
+        let cover_href_std = if cover_files.contains(&cover_path_std_png) {
+            cover_path_std_png
+                .canonicalize()
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned())
+        } else if cover_files.contains(&cover_path_std_jpg) {
+            cover_path_std_jpg
+                .canonicalize()
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned())
+        } else {
+            None
         };
-        writeln!(svg, "<rect x='{cover_x}' y='{cover_y}' width='{cover_size_w:.1}' height='{cover_size_h:.1}' fill='{placeholder_color}' rx='4' ry='4'/>").map_err(fmt_err)?;
+        
+        if let Some(href_std) = cover_href_std {
+            let escaped_href_std = escape_xml(&href_std);
+            writeln!(svg, r#"<image href="{escaped_href_std}" x="{cover_x}" y="{cover_y}" width="{cover_size_w:.1}" height="{cover_size_h:.1}" clip-path="url(#{clip_path_id})" />"#).map_err(fmt_err)?;
+        } else {
+            // 如果仍然找不到封面，使用占位符
+            let placeholder_color = match theme {
+                crate::controllers::image::Theme::White => "#DDD",
+                crate::controllers::image::Theme::Black => "#333",
+            };
+            writeln!(svg, "<rect x='{cover_x}' y='{cover_y}' width='{cover_size_w:.1}' height='{cover_size_h:.1}' fill='{placeholder_color}' rx='4' ry='4'/>").map_err(fmt_err)?;
+        }
     }
 
     // Text content positioning

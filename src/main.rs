@@ -136,7 +136,7 @@ async fn main() -> std::io::Result<()> {
     log::info!("API 文档位于 http://{host}:{port}/swagger-ui/");
 
     // 启动定时任务，定期输出缓存统计信息
-    let image_service_clone = web::Data::new(ImageService::new());
+    let image_service_clone = web::Data::new(ImageService::new().with_db_pool(pool.clone()));
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(300)); // 每5分钟
         loop {
@@ -157,7 +157,7 @@ async fn main() -> std::io::Result<()> {
         let song_service = web::Data::new(SongService::new());
         let user_service = web::Data::new(UserService::new(pool.clone()));
         let player_archive_service = web::Data::new(player_archive_service.clone());
-        let image_service = web::Data::new(ImageService::new());
+        let image_service = web::Data::new(ImageService::new().with_db_pool(pool.clone()));
 
         let openapi = ApiDoc::openapi();
 
