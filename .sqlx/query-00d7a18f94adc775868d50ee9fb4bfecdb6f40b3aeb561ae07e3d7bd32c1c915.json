@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, image_type, count, last_updated FROM image_counter WHERE image_type = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "image_type",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "count",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_updated",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "00d7a18f94adc775868d50ee9fb4bfecdb6f40b3aeb561ae07e3d7bd32c1c915"
+}

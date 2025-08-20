@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE image_counter SET count = count + 1, last_updated = datetime('now') WHERE image_type = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "6cc1197d435070ffe48a3fe0214d9795664b656d79495d38508455a441bf2fcf"
+}
