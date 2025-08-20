@@ -75,6 +75,9 @@ rayon = "1.11.0"
 moka = { version = "0.12", features = ["future"] }
 lru = "0.16"
 
+# 异步流处理
+futures = "0.3"
+
 # API文档
 utoipa = { version = "5.4.0", features = ["actix_extras"] }
 utoipa-swagger-ui = { version = "9.0.2", features = ["actix-web"] }

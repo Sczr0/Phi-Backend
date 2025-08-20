@@ -4,6 +4,7 @@ use crate::models::player_archive::{
 use crate::models::rks::RksRecord;
 use crate::utils::error::AppError;
 use chrono::{DateTime, Utc};
+use futures::TryStreamExt;
 use log;
 use moka::future::Cache;
 use sqlx::Row;
@@ -91,12 +92,17 @@ WHERE pa.player_id = ?1 AND (rs.is_current = 1 OR rs.history_rank <= ?2 OR rs.so
 ORDER BY rs.play_time DESC;
         ";
 
-        let rows = query_as::<_, CombinedScoreRecord>(query_sql)
+        // 使用流式处理替代 fetch_all
+        let mut stream = query_as::<_, CombinedScoreRecord>(query_sql)
             .bind(player_id)
             .bind(history_limit)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| AppError::DatabaseError(format!("合并查询玩家存档失败: {e}")))?;
+            .fetch(&self.pool);
+
+        // 收集结果
+        let mut rows = Vec::new();
+        while let Some(row) = stream.try_next().await.map_err(|e| AppError::DatabaseError(format!("合并查询玩家存档失败: {e}")))? {
+            rows.push(row);
+        }
 
         if rows.is_empty() {
             log::debug!("玩家[{player_id}]不存在");
