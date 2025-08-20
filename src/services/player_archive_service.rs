@@ -349,50 +349,52 @@ ORDER BY rs.play_time DESC;
             return Ok(());
         }
 
-        // 2. 将该玩家所有谱面的 is_current 设为 0
+        // 2. 批量删除该玩家所有旧成绩记录（比UPDATE更高效）
         query!(
-            "UPDATE chart_scores SET is_current = 0 WHERE player_id = ?",
+            "DELETE FROM chart_scores WHERE player_id = ?",
             player_id
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| AppError::DatabaseError(format!("重置旧成绩状态失败: {e}")))?;
+        .map_err(|e| AppError::DatabaseError(format!("删除旧成绩记录失败: {e}")))?;
 
-        // 3. 循环插入新的当前成绩
+        // 3. 批量插入新的当前成绩（使用事务优化性能）
         log::debug!("开始批量插入 {} 条新成绩记录...", rks_records.len());
-        let insert_sql = "
-            INSERT INTO chart_scores 
-            (player_id, song_id, song_name, difficulty, difficulty_value, score, acc, rks, is_fc, is_phi, play_time, is_current) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-        ";
-
-        for record in rks_records {
-            let key = format!("{}-{}", record.song_id, record.difficulty);
-            let is_fc = fc_map.get(&key).copied().unwrap_or(false) as i32;
-            let is_phi = (record.acc >= 100.0) as i32;
-
-            query(insert_sql)
-                .bind(player_id)
-                .bind(&record.song_id)
-                .bind(&record.song_name)
-                .bind(&record.difficulty)
-                .bind(record.difficulty_value)
-                .bind(record.score.unwrap_or(0.0))
-                .bind(record.acc)
-                .bind(record.rks)
-                .bind(is_fc)
-                .bind(is_phi)
-                .bind(update_time)
-                .execute(&mut *tx)
+        
+        if !rks_records.is_empty() {
+            // 使用 sqlx::QueryBuilder 进行批量插入
+            let mut query_builder = sqlx::QueryBuilder::new(
+                "INSERT INTO chart_scores (player_id, song_id, song_name, difficulty, difficulty_value, score, acc, rks, is_fc, is_phi, play_time, is_current)"
+            );
+            
+            query_builder.push_values(rks_records.iter(), |mut b, record| {
+                let key = format!("{}-{}", record.song_id, record.difficulty);
+                let is_fc = fc_map.get(&key).copied().unwrap_or(false) as i32;
+                let is_phi = (record.acc >= 100.0) as i32;
+                
+                b.push_bind(player_id)
+                 .push_bind(&record.song_id)
+                 .push_bind(&record.song_name)
+                 .push_bind(&record.difficulty)
+                 .push_bind(record.difficulty_value)
+                 .push_bind(record.score.unwrap_or(0.0))
+                 .push_bind(record.acc)
+                 .push_bind(record.rks)
+                 .push_bind(is_fc)
+                 .push_bind(is_phi)
+                 .push_bind(update_time)
+                 .push_bind(1i32); // is_current = 1
+            });
+            
+            let query = query_builder.build();
+            query.execute(&mut *tx)
                 .await
-                .map_err(|e| {
-                    AppError::DatabaseError(format!(
-                        "批量插入成绩失败: song_id={}, {}",
-                        record.song_id, e
-                    ))
-                })?;
+                .map_err(|e| AppError::DatabaseError(format!("批量插入成绩失败: {e}")))?;
+            
+            log::debug!("批量插入完成");
+        } else {
+            log::debug!("没有成绩记录需要插入");
         }
-        log::debug!("批量插入完成");
 
         // 提交事务
         tx.commit()
