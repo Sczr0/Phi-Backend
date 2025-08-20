@@ -19,20 +19,20 @@ impl SongService {
         let mut id_to_song = std::collections::HashMap::new();
         let mut name_to_song = std::collections::HashMap::new();
         let mut nickname_to_song = std::collections::HashMap::new();
-        
+
         // 预处理数据，构建查找映射
         for song_info in SONG_INFO.iter() {
             id_to_song.insert(song_info.id.clone(), song_info.clone());
             name_to_song.insert(song_info.song.to_lowercase(), song_info.clone());
         }
-        
+
         // 构建别名映射
         for (song_name, nicknames) in SONG_NICKNAMES.iter() {
             for nickname in nicknames {
                 nickname_to_song.insert(nickname.to_lowercase(), song_name.clone());
             }
         }
-        
+
         Self {
             id_to_song,
             name_to_song,
@@ -72,24 +72,28 @@ impl SongService {
         }
 
         // 4. 尝试歌曲名模糊匹配 (O(N) 复杂度，但只在必要时执行)
-        let name_matches: Vec<_> = self.name_to_song
+        let name_matches: Vec<_> = self
+            .name_to_song
             .iter()
             .filter(|(name, _)| name.contains(&query_lower))
             .map(|(_, info)| info)
             .collect();
-            
+
         if name_matches.len() == 1 {
             log::info!("通过歌曲名模糊匹配找到歌曲: {}", name_matches[0].song);
             return Ok(name_matches[0].clone());
         }
 
         // 5. 尝试别名模糊匹配 (O(N) 复杂度，但只在必要时执行)
-        let nickname_matches: Vec<_> = self.nickname_to_song
+        let nickname_matches: Vec<_> = self
+            .nickname_to_song
             .iter()
             .filter_map(|(nickname, song_name)| {
                 if nickname.contains(&query_lower) {
                     // 通过歌曲名查找歌曲信息
-                    self.name_to_song.get(&song_name.to_lowercase()).map(|info| (info, nickname))
+                    self.name_to_song
+                        .get(&song_name.to_lowercase())
+                        .map(|info| (info, nickname))
                 } else {
                     None
                 }
@@ -98,7 +102,11 @@ impl SongService {
 
         if nickname_matches.len() == 1 {
             let (info, nickname) = &nickname_matches[0];
-            log::info!("通过别名模糊匹配找到歌曲: {} (别名: {})", info.song, nickname);
+            log::info!(
+                "通过别名模糊匹配找到歌曲: {} (别名: {})",
+                info.song,
+                nickname
+            );
             return Ok((*info).clone());
         }
 

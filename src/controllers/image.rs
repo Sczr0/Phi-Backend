@@ -205,13 +205,17 @@ pub async fn get_image_stats_by_type(
 ) -> Result<HttpResponse, AppError> {
     let image_type = path.into_inner();
     let valid_types = ["bn", "song", "leaderboard"];
-    
+
     if !valid_types.contains(&image_type.as_str()) {
-        return Err(AppError::BadRequest(format!("无效的图片类型 '{}'. 有效类型: {}", image_type, valid_types.join(", "))));
+        return Err(AppError::BadRequest(format!(
+            "无效的图片类型 '{}'. 有效类型: {}",
+            image_type,
+            valid_types.join(", ")
+        )));
     }
-    
+
     let stats = image_service.get_image_stats_by_type(&image_type).await?;
-    
+
     match stats {
         Some(counter) => Ok(HttpResponse::Ok().json(json!({
             "type": counter.image_type,
@@ -222,6 +226,6 @@ pub async fn get_image_stats_by_type(
             "type": image_type,
             "count": 0,
             "last_updated": "never"
-        })))
+        }))),
     }
 }

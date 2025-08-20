@@ -94,7 +94,11 @@ pub async fn generate_qr_code() -> impl Responder {
                 .build();
 
             // 3. 使用 image_renderer 将SVG转换为PNG字节（使用阻塞任务）
-            let png_bytes = match tokio::task::spawn_blocking(move || image_renderer::render_svg_to_png(svg_str)).await {
+            let png_bytes = match tokio::task::spawn_blocking(move || {
+                image_renderer::render_svg_to_png(svg_str)
+            })
+            .await
+            {
                 Ok(Ok(bytes)) => bytes,
                 Ok(Err(e)) => {
                     log::error!("Failed to render QR code SVG to PNG: {e:?}");
@@ -102,7 +106,7 @@ pub async fn generate_qr_code() -> impl Responder {
                         "error": "Failed to render QR code",
                         "details": e.to_string()
                     }));
-                },
+                }
                 Err(e) => {
                     log::error!("Blocking task error for QR code: {e:?}");
                     return HttpResponse::InternalServerError().json(serde_json::json!({

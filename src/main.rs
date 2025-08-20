@@ -141,7 +141,11 @@ async fn main() -> std::io::Result<()> {
         loop {
             interval.tick().await;
             let stats = image_service_clone.get_cache_stats();
-            log::info!("图片缓存统计: {}", serde_json::to_string_pretty(&stats).unwrap_or_else(|_| "无法序列化统计信息".to_string()));
+            log::info!(
+                "图片缓存统计: {}",
+                serde_json::to_string_pretty(&stats)
+                    .unwrap_or_else(|_| "无法序列化统计信息".to_string())
+            );
         }
     });
 

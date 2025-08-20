@@ -255,7 +255,7 @@ impl PhigrosService {
         log::debug!("成功获取云端存档元数据。");
         Ok(summary)
     }
-    
+
     // 获取存档的校验和，用于作为缓存键的一部分
     pub async fn get_save_checksum(&self, token: &str) -> AppResult<String> {
         let summary = self.fetch_summary(token).await?;

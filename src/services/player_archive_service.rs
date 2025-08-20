@@ -100,7 +100,11 @@ ORDER BY rs.play_time DESC;
 
         // 收集结果
         let mut rows = Vec::new();
-        while let Some(row) = stream.try_next().await.map_err(|e| AppError::DatabaseError(format!("合并查询玩家存档失败: {e}")))? {
+        while let Some(row) = stream
+            .try_next()
+            .await
+            .map_err(|e| AppError::DatabaseError(format!("合并查询玩家存档失败: {e}")))?
+        {
             rows.push(row);
         }
 
@@ -117,14 +121,15 @@ ORDER BY rs.play_time DESC;
             let mut push_acc_map = HashMap::new();
             if self.config.store_push_acc {
                 for row in &rows {
-                    if let (Some(song_id), Some(difficulty), Some(push_acc)) = 
-                        (&row.song_id, &row.difficulty, row.push_acc) {
+                    if let (Some(song_id), Some(difficulty), Some(push_acc)) =
+                        (&row.song_id, &row.difficulty, row.push_acc)
+                    {
                         let key = format!("{song_id}-{difficulty}");
                         push_acc_map.insert(key, push_acc);
                     }
                 }
             }
-            
+
             let archive = PlayerArchive {
                 player_id: first_row.player_id.clone(),
                 player_name: first_row.player_name.clone(),
@@ -133,10 +138,10 @@ ORDER BY rs.play_time DESC;
                 best_scores: HashMap::new(),
                 best_n_scores: Vec::new(),
                 chart_histories: HashMap::new(),
-                push_acc_map: if self.config.store_push_acc && !push_acc_map.is_empty() { 
-                    Some(push_acc_map) 
-                } else { 
-                    None 
+                push_acc_map: if self.config.store_push_acc && !push_acc_map.is_empty() {
+                    Some(push_acc_map)
+                } else {
+                    None
                 },
             };
             let arc_archive = Arc::new(archive.clone());
@@ -201,8 +206,9 @@ ORDER BY rs.play_time DESC;
         let mut push_acc_map = HashMap::new();
         if self.config.store_push_acc {
             for row in &rows {
-                if let (Some(song_id), Some(difficulty), Some(push_acc)) = 
-                    (&row.song_id, &row.difficulty, row.push_acc) {
+                if let (Some(song_id), Some(difficulty), Some(push_acc)) =
+                    (&row.song_id, &row.difficulty, row.push_acc)
+                {
                     let key = format!("{song_id}-{difficulty}");
                     push_acc_map.insert(key, push_acc);
                 }
@@ -217,10 +223,10 @@ ORDER BY rs.play_time DESC;
             best_scores,
             best_n_scores: all_current_scores,
             chart_histories,
-            push_acc_map: if self.config.store_push_acc && !push_acc_map.is_empty() { 
-                Some(push_acc_map) 
-            } else { 
-                None 
+            push_acc_map: if self.config.store_push_acc && !push_acc_map.is_empty() {
+                Some(push_acc_map)
+            } else {
+                None
             },
         };
 
@@ -350,47 +356,45 @@ ORDER BY rs.play_time DESC;
         }
 
         // 2. 批量删除该玩家所有旧成绩记录（比UPDATE更高效）
-        query!(
-            "DELETE FROM chart_scores WHERE player_id = ?",
-            player_id
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| AppError::DatabaseError(format!("删除旧成绩记录失败: {e}")))?;
+        query!("DELETE FROM chart_scores WHERE player_id = ?", player_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| AppError::DatabaseError(format!("删除旧成绩记录失败: {e}")))?;
 
         // 3. 批量插入新的当前成绩（使用事务优化性能）
         log::debug!("开始批量插入 {} 条新成绩记录...", rks_records.len());
-        
+
         if !rks_records.is_empty() {
             // 使用 sqlx::QueryBuilder 进行批量插入
             let mut query_builder = sqlx::QueryBuilder::new(
                 "INSERT INTO chart_scores (player_id, song_id, song_name, difficulty, difficulty_value, score, acc, rks, is_fc, is_phi, play_time, is_current)"
             );
-            
+
             query_builder.push_values(rks_records.iter(), |mut b, record| {
                 let key = format!("{}-{}", record.song_id, record.difficulty);
                 let is_fc = fc_map.get(&key).copied().unwrap_or(false) as i32;
                 let is_phi = (record.acc >= 100.0) as i32;
-                
+
                 b.push_bind(player_id)
-                 .push_bind(&record.song_id)
-                 .push_bind(&record.song_name)
-                 .push_bind(&record.difficulty)
-                 .push_bind(record.difficulty_value)
-                 .push_bind(record.score.unwrap_or(0.0))
-                 .push_bind(record.acc)
-                 .push_bind(record.rks)
-                 .push_bind(is_fc)
-                 .push_bind(is_phi)
-                 .push_bind(update_time)
-                 .push_bind(1i32); // is_current = 1
+                    .push_bind(&record.song_id)
+                    .push_bind(&record.song_name)
+                    .push_bind(&record.difficulty)
+                    .push_bind(record.difficulty_value)
+                    .push_bind(record.score.unwrap_or(0.0))
+                    .push_bind(record.acc)
+                    .push_bind(record.rks)
+                    .push_bind(is_fc)
+                    .push_bind(is_phi)
+                    .push_bind(update_time)
+                    .push_bind(1i32); // is_current = 1
             });
-            
+
             let query = query_builder.build();
-            query.execute(&mut *tx)
+            query
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| AppError::DatabaseError(format!("批量插入成绩失败: {e}")))?;
-            
+
             log::debug!("批量插入完成");
         } else {
             log::debug!("没有成绩记录需要插入");
@@ -517,19 +521,23 @@ ORDER BY rs.play_time DESC;
 
             // 使用 sqlx::QueryBuilder 安全地构建批量插入语句
             let mut query_builder = sqlx::QueryBuilder::new(
-                "INSERT INTO push_acc (player_id, song_id, difficulty, push_acc, update_time)"
+                "INSERT INTO push_acc (player_id, song_id, difficulty, push_acc, update_time)",
             );
-            
-            query_builder.push_values(records_to_insert.iter(), |mut b, (song_id, difficulty, push_acc)| {
-                b.push_bind(player_id)
-                    .push_bind(song_id)
-                    .push_bind(difficulty)
-                    .push_bind(push_acc)
-                    .push_bind(update_time);
-            });
+
+            query_builder.push_values(
+                records_to_insert.iter(),
+                |mut b, (song_id, difficulty, push_acc)| {
+                    b.push_bind(player_id)
+                        .push_bind(song_id)
+                        .push_bind(difficulty)
+                        .push_bind(push_acc)
+                        .push_bind(update_time);
+                },
+            );
 
             let query = query_builder.build();
-            query.execute(&mut *tx)
+            query
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| AppError::DatabaseError(format!("批量插入推分ACC失败: {e}")))?;
         }
@@ -605,13 +613,12 @@ ORDER BY rs.play_time DESC;
 
     /// 获取最新的RKS更新时间
     pub async fn get_latest_rks_update_time(&self) -> Result<String, AppError> {
-        let result = sqlx::query_scalar::<_, String>(
-            "SELECT MAX(update_time) FROM player_archives"
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-        
+        let result =
+            sqlx::query_scalar::<_, String>("SELECT MAX(update_time) FROM player_archives")
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+
         Ok(result.unwrap_or_else(|| chrono::Utc::now().to_rfc3339()))
     }
 

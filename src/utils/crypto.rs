@@ -15,18 +15,14 @@ static AES_KEY: Lazy<[u8; 32]> = Lazy::new(|| {
     let key_vec = general_purpose::STANDARD
         .decode(AES_KEY_BASE64)
         .expect("无法解码配置中的AES密钥 (AES_KEY_BASE64)");
-    key_vec
-        .try_into()
-        .expect("配置中的AES密钥长度必须是32字节")
+    key_vec.try_into().expect("配置中的AES密钥长度必须是32字节")
 });
 
 static AES_IV: Lazy<[u8; 16]> = Lazy::new(|| {
     let iv_vec = general_purpose::STANDARD
         .decode(AES_IV_BASE64)
         .expect("无法解码配置中的AES IV (AES_IV_BASE64)");
-    iv_vec
-        .try_into()
-        .expect("配置中的AES IV长度必须是16字节")
+    iv_vec.try_into().expect("配置中的AES IV长度必须是16字节")
 });
 
 #[allow(dead_code)]
@@ -48,13 +44,11 @@ pub fn decrypt(data: &[u8]) -> AppResult<Vec<u8>> {
         .map_err(|e| AppError::AesError(format!("AES解密器初始化失败: {e}")))?;
 
     // 库会处理解密和去填充，如果填充错误或数据损坏，这里会返回Err
-    cipher
-        .decrypt_padded_vec_mut::<Pkcs7>(data)
-        .map_err(|e| {
-            log::error!("AES解密失败: {e}");
-            // 这里的错误比简单的 to_string() 信息更丰富
-            AppError::AesError(format!("解密或去填充失败: {e}"))
-        })
+    cipher.decrypt_padded_vec_mut::<Pkcs7>(data).map_err(|e| {
+        log::error!("AES解密失败: {e}");
+        // 这里的错误比简单的 to_string() 信息更丰富
+        AppError::AesError(format!("解密或去填充失败: {e}"))
+    })
 }
 
 #[allow(dead_code)]
@@ -64,7 +58,6 @@ pub fn calculate_md5(data: &[u8]) -> String {
     let result = hasher.finalize();
     format!("{result:x}")
 }
-
 
 // --- session token 验证 ---
 pub fn validate_session_token(token: &str) -> bool {

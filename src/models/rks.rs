@@ -28,7 +28,7 @@ pub struct RksRecord {
 
 impl RksRecord {
     /// 创建新的RKS记录
-    /// 
+    ///
     /// # 参数
     /// * `song_id` - 歌曲ID
     /// * `song_name` - 歌曲名称
@@ -92,7 +92,7 @@ pub struct RksResult {
 
 impl RksResult {
     /// 创建新的RKS结果
-    /// 
+    ///
     /// # 参数
     /// * `records` - RKS记录列表
     pub fn new(records: Vec<RksRecord>) -> Self {

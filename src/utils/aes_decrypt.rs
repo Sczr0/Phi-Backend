@@ -44,4 +44,3 @@ pub fn decrypt_save_data(data: &[u8]) -> AppResult<String> {
 
     Ok(json_str)
 }
-

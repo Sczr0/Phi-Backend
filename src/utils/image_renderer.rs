@@ -77,7 +77,12 @@ const SONG_ILLUST_ASPECT_RATIO: f64 = 1.0; // 假设单曲图的插画是方形�
 static GLOBAL_FONT_DB: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
 
 // 背景图片 LRU 缓存和封面文件列表的组合结构
-type BackgroundAndCoverCache = (std::sync::Mutex<LruCache<PathBuf, String>>, Vec<PathBuf>, std::sync::Mutex<HashMap<String, String>>, std::sync::Mutex<std::collections::HashSet<PathBuf>>);
+type BackgroundAndCoverCache = (
+    std::sync::Mutex<LruCache<PathBuf, String>>,
+    Vec<PathBuf>,
+    std::sync::Mutex<HashMap<String, String>>,
+    std::sync::Mutex<std::collections::HashSet<PathBuf>>,
+);
 static BACKGROUND_AND_COVER_CACHE: OnceLock<BackgroundAndCoverCache> = OnceLock::new();
 const BACKGROUND_CACHE_SIZE: usize = 10; // 缓存10张背景图片
 const COVER_METADATA_CACHE_SIZE: usize = 10000; // 缓存封面元数据
@@ -123,7 +128,9 @@ fn init_background_and_cover_cache() -> BackgroundAndCoverCache {
     ));
 
     // 初始化封面元数据缓存
-    let _metadata_cache = std::sync::Mutex::new(HashMap::<String, String>::with_capacity(COVER_METADATA_CACHE_SIZE));
+    let _metadata_cache = std::sync::Mutex::new(HashMap::<String, String>::with_capacity(
+        COVER_METADATA_CACHE_SIZE,
+    ));
 
     // 读取封面目录下的所有图片文件（包括 ill 和 illBlur 目录）
     let mut cover_files = Vec::new();
@@ -162,7 +169,11 @@ fn init_background_and_cover_cache() -> BackgroundAndCoverCache {
             }
         }
         Err(e) => {
-            log::error!("读取背景目录失败 '{}': {}", background_base_path.display(), e);
+            log::error!(
+                "读取背景目录失败 '{}': {}",
+                background_base_path.display(),
+                e
+            );
         }
     }
 
@@ -173,7 +184,10 @@ fn init_background_and_cover_cache() -> BackgroundAndCoverCache {
     for cover_path in &cover_files {
         if let Some(song_id) = cover_path.file_name().and_then(|name| name.to_str()) {
             if let Some(song_id) = song_id.split('.').next() {
-                metadata_map.insert(song_id.to_string(), cover_path.to_string_lossy().to_string());
+                metadata_map.insert(
+                    song_id.to_string(),
+                    cover_path.to_string_lossy().to_string(),
+                );
             }
         }
     }
@@ -181,12 +195,23 @@ fn init_background_and_cover_cache() -> BackgroundAndCoverCache {
     // 创建 HashSet 用于快速查找
     let cover_files_set: std::collections::HashSet<PathBuf> = cover_files.iter().cloned().collect();
 
-    (cache, cover_files, std::sync::Mutex::new(metadata_map), std::sync::Mutex::new(cover_files_set))
+    (
+        cache,
+        cover_files,
+        std::sync::Mutex::new(metadata_map),
+        std::sync::Mutex::new(cover_files_set),
+    )
 }
 
 /// 获取背景图片缓存和封面文件列表
-fn get_background_and_cover_cache() -> (&'static std::sync::Mutex<LruCache<PathBuf, String>>, &'static Vec<PathBuf>, &'static std::sync::Mutex<HashMap<String, String>>, &'static std::sync::Mutex<std::collections::HashSet<PathBuf>>) {
-    let (cache, files, metadata, cover_set) = BACKGROUND_AND_COVER_CACHE.get_or_init(init_background_and_cover_cache);
+fn get_background_and_cover_cache() -> (
+    &'static std::sync::Mutex<LruCache<PathBuf, String>>,
+    &'static Vec<PathBuf>,
+    &'static std::sync::Mutex<HashMap<String, String>>,
+    &'static std::sync::Mutex<std::collections::HashSet<PathBuf>>,
+) {
+    let (cache, files, metadata, cover_set) =
+        BACKGROUND_AND_COVER_CACHE.get_or_init(init_background_and_cover_cache);
     (cache, files, metadata, cover_set)
 }
 
@@ -235,7 +260,8 @@ fn get_background_image(path: &PathBuf) -> Option<String> {
 
         // 放入缓存，但限制单个文件大小
         let file_size = data.len();
-        if file_size <= 1024 * 1024 { // 限制1MB以内
+        if file_size <= 1024 * 1024 {
+            // 限制1MB以内
             cache.put(path.clone(), image_data.clone());
         }
 
@@ -326,7 +352,9 @@ fn generate_card_svg(info: CardRenderInfo) -> Result<(), AppError> {
     // Cover Image or Placeholder
     // 使用预构建的封面元数据缓存，避免运行时文件系统调用
     let metadata_cache = get_cover_metadata_cache();
-    let cover_href = metadata_cache.lock().unwrap()
+    let cover_href = metadata_cache
+        .lock()
+        .unwrap()
         .get(&score.song_id)
         .cloned()
         .or_else(|| {
@@ -361,7 +389,7 @@ fn generate_card_svg(info: CardRenderInfo) -> Result<(), AppError> {
     if let Some(href) = cover_href {
         let escaped_href = escape_xml(&href);
         writeln!(svg, r#"<image href="{escaped_href}" x="{cover_x}" y="{cover_y}" width="{cover_size_w:.1}" height="{cover_size_h:.1}" clip-path="url(#{clip_path_id})" />"#).map_err(fmt_err)?;
-    // 不需要额外处理，上面的 or_else 已经涵盖了所有情况
+        // 不需要额外处理，上面的 or_else 已经涵盖了所有情况
     }
 
     // Text content positioning
@@ -574,6 +602,7 @@ pub fn generate_svg_string(
     push_acc_map: Option<&HashMap<String, f64>>, // 新增：预先计算的推分ACC映射，键为"曲目ID-难度"
     theme: &crate::controllers::image::Theme,    // 新增：主题参数
 ) -> Result<String, AppError> {
+    let start_time = std::time::Instant::now();
     // ... (width, height calculations etc. - keep these as they were) ...
     let width = 1200;
     let header_height = 120;
@@ -660,8 +689,9 @@ pub fn generate_svg_string(
         .iter()
         .filter(|path| {
             // 检查路径是否在 illBlur 目录下且是图片文件
-            path.starts_with(&background_base_path) &&
-            (path.extension() == Some("png".as_ref()) || path.extension() == Some("jpg".as_ref()))
+            path.starts_with(&background_base_path)
+                && (path.extension() == Some("png".as_ref())
+                    || path.extension() == Some("jpg".as_ref()))
         })
         .collect();
 
@@ -1308,7 +1338,10 @@ pub fn generate_song_svg_string(data: &SongRenderData) -> Result<String, AppErro
     // --- 曲绘和曲目名称（左侧）---
     let illust_x = padding;
     let illust_y = player_info_y + player_info_height + padding; // 在玩家信息区域下方
-    let illust_href = data.illustration_path.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let illust_href = data
+        .illustration_path
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned());
 
     // 曲目名称位置
     let song_name_x = illust_x;

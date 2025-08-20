@@ -80,7 +80,7 @@ impl ImageService {
             db_pool: None,
         }
     }
-    
+
     pub fn with_db_pool(mut self, pool: sqlx::SqlitePool) -> Self {
         self.db_pool = Some(pool);
         self
@@ -99,31 +99,48 @@ impl ImageService {
         user_service: web::Data<UserService>,
         player_archive_service: web::Data<PlayerArchiveService>,
     ) -> Result<Vec<u8>, AppError> {
+        let start_time = std::time::Instant::now();
         let token = resolve_token(&identifier, &user_service).await?;
-        
+        log::info!("BN图片生成 - Token解析耗时: {:?}", start_time.elapsed());
+
         // 获取存档校验和作为数据版本标识
-        let save_checksum = phigros_service.get_save_checksum(&token).await.unwrap_or_else(|_| "unknown".to_string());
-        
+        let checksum_start = std::time::Instant::now();
+        let save_checksum = phigros_service
+            .get_save_checksum(&token)
+            .await
+            .unwrap_or_else(|_| "unknown".to_string());
+        log::info!(
+            "BN图片生成 - 获取存档校验和耗时: {:?}",
+            checksum_start.elapsed()
+        );
+
         // 使用数据版本标识和参数作为缓存键，确保数据变化时缓存失效
         let cache_key = (n, save_checksum.clone(), theme.clone());
-        
+
         // 先检查缓存中是否已存在
         if let Some(cached) = self.bn_image_cache.get(&cache_key).await {
             // 记录真实的缓存命中
             self.bn_cache_hits.fetch_add(1, AtomicOrdering::Relaxed);
             log::debug!("BN图片缓存命中: n={}, checksum={}", n, &save_checksum[..8]);
+            log::info!("BN图片生成 - 总耗时(缓存命中): {:?}", start_time.elapsed());
             return Ok(cached.to_vec());
         }
 
         let image_bytes_arc = self
             .bn_image_cache
             .try_get_with(cache_key, async {
+                let data_fetch_start = std::time::Instant::now();
                 // 只在这里获取一次数据
                 let (rks_save_res, profile_res) = tokio::join!(
                     phigros_service.get_rks(&token),
                     phigros_service.get_profile(&token)
                 );
+                log::info!(
+                    "BN图片生成 - 数据获取耗时: {:?}",
+                    data_fetch_start.elapsed()
+                );
 
+                let data_process_start = std::time::Instant::now();
                 let (all_rks_result, save) = rks_save_res?;
                 if all_rks_result.records.is_empty() {
                     return Err(AppError::Other(format!(
@@ -217,18 +234,28 @@ impl ImageService {
                 } else {
                     None
                 };
+                log::info!(
+                    "BN图片生成 - 数据处理耗时: {:?}",
+                    data_process_start.elapsed()
+                );
 
                 // 性能优化：对于未绑定的直接提供Token的用户，计算推分acc时只限制在规定范围内
                 // 比如渲染Bn图片时仅计算BestN以内的推分acc
                 // 优化：预计算推分ACC，利用服务层缓存减少重复计算
+                let push_acc_start = std::time::Instant::now();
                 let mut push_acc_map: HashMap<String, f64> = HashMap::new();
-                for score in top_n_scores.iter()
-                    .filter(|score| score.acc < 100.0 && score.difficulty_value > 0.0) 
+                for score in top_n_scores
+                    .iter()
+                    .filter(|score| score.acc < 100.0 && score.difficulty_value > 0.0)
                 {
                     let target_chart_id_full = format!("{}-{}", score.song_id, score.difficulty);
-                    
+
                     // 尝试从服务层缓存获取
-                    if let Some(cached_push_acc) = self.push_acc_cache.get(&(target_chart_id_full.clone(), player_id.clone())).await {
+                    if let Some(cached_push_acc) = self
+                        .push_acc_cache
+                        .get(&(target_chart_id_full.clone(), player_id.clone()))
+                        .await
+                    {
                         push_acc_map.insert(target_chart_id_full.clone(), cached_push_acc);
                     } else {
                         // 缓存未命中，重新计算
@@ -238,12 +265,19 @@ impl ImageService {
                             &top_n_scores,
                         ) {
                             // 存入缓存
-                            self.push_acc_cache.insert((target_chart_id_full.clone(), player_id.clone()), push_acc).await;
+                            self.push_acc_cache
+                                .insert((target_chart_id_full.clone(), player_id.clone()), push_acc)
+                                .await;
                             push_acc_map.insert(target_chart_id_full.clone(), push_acc);
                         }
                     }
                 }
+                log::info!(
+                    "BN图片生成 - 推分ACC计算耗时: {:?}",
+                    push_acc_start.elapsed()
+                );
 
+                let challenge_data_start = std::time::Instant::now();
                 let (challenge_rank, data_string) = if let Some(game_progress) = &save.game_progress
                 {
                     // 1. 解析课题等级
@@ -301,7 +335,12 @@ impl ImageService {
                 } else {
                     (None, None)
                 };
+                log::info!(
+                    "BN图片生成 - 课题数据处理耗时: {:?}",
+                    challenge_data_start.elapsed()
+                );
 
+                let stats_creation_start = std::time::Instant::now();
                 let app_config = crate::utils::config::get_config()?;
                 let stats = PlayerStats {
                     ap_top_3_avg,
@@ -315,20 +354,32 @@ impl ImageService {
                     data_string,
                     custom_footer_text: Some(app_config.custom_footer_text),
                 };
+                log::info!(
+                    "BN图片生成 - Stats创建耗时: {:?}",
+                    stats_creation_start.elapsed()
+                );
 
+                let render_start = std::time::Instant::now();
                 let theme_clone = theme.clone();
                 let png_data = tokio::task::spawn_blocking(move || {
+                    let svg_gen_start = std::time::Instant::now();
                     let svg_string = image_renderer::generate_svg_string(
                         &top_n_scores,
                         &stats,
                         Some(&push_acc_map),
                         &theme_clone,
                     )?;
-                    image_renderer::render_svg_to_png(svg_string)
+                    log::info!("BN图片生成 - SVG生成耗时: {:?}", svg_gen_start.elapsed());
+
+                    let png_render_start = std::time::Instant::now();
+                    let result = image_renderer::render_svg_to_png(svg_string);
+                    log::info!("BN图片生成 - PNG渲染耗时: {:?}", png_render_start.elapsed());
+                    result
                 })
                 .await
                 .map_err(|e| AppError::InternalError(format!("Blocking task join error: {e}")))?
                 .map_err(|e| AppError::InternalError(format!("SVG rendering error: {e}")))?;
+                log::info!("BN图片生成 - 渲染总耗时: {:?}", render_start.elapsed());
 
                 Ok(Arc::new(png_data))
             })
@@ -337,13 +388,21 @@ impl ImageService {
 
         // 记录缓存未命中（只有在try_get_with实际计算生成图片时才会执行到这里）
         self.bn_cache_misses.fetch_add(1, AtomicOrdering::Relaxed);
-        log::debug!("BN图片缓存未命中: n={}, checksum={}", n, &save_checksum[..8]);
-        
+        log::debug!(
+            "BN图片缓存未命中: n={}, checksum={}",
+            n,
+            &save_checksum[..8]
+        );
+
         // 增加计数器
         if let Err(e) = self.increment_counter("bn").await {
             log::error!("更新BN图片计数器失败: {e}");
         }
-        
+
+        log::info!(
+            "BN图片生成 - 总耗时(缓存未命中): {:?}",
+            start_time.elapsed()
+        );
         Ok(image_bytes_arc.to_vec())
     }
 
@@ -357,39 +416,73 @@ impl ImageService {
         song_service: web::Data<SongService>,
         player_archive_service: web::Data<PlayerArchiveService>,
     ) -> Result<Vec<u8>, AppError> {
+        let start_time = std::time::Instant::now();
         let token = resolve_token(&identifier, &user_service).await?;
-        
+        log::info!("歌曲图片生成 - Token解析耗时: {:?}", start_time.elapsed());
+
         // 获取歌曲信息用于缓存键
+        let song_search_start = std::time::Instant::now();
         let song_info = song_service.search_song(&song_query)?;
         let song_id = song_info.id.clone();
-        
+        log::info!(
+            "歌曲图片生成 - 歌曲搜索耗时: {:?}",
+            song_search_start.elapsed()
+        );
+
         // 获取存档校验和作为数据版本标识
-        let save_checksum = phigros_service.get_save_checksum(&token).await.unwrap_or_else(|_| "unknown".to_string());
-        
+        let checksum_start = std::time::Instant::now();
+        let save_checksum = phigros_service
+            .get_save_checksum(&token)
+            .await
+            .unwrap_or_else(|_| "unknown".to_string());
+        log::info!(
+            "歌曲图片生成 - 获取存档校验和耗时: {:?}",
+            checksum_start.elapsed()
+        );
+
         // 使用数据版本标识和参数作为缓存键，确保数据变化时缓存失效
         let cache_key = (song_id.clone(), save_checksum.clone());
-        
+
         // 先检查缓存中是否已存在
         if let Some(cached) = self.song_image_cache.get(&cache_key).await {
             // 记录真实的缓存命中
             self.song_cache_hits.fetch_add(1, AtomicOrdering::Relaxed);
-            log::debug!("歌曲图片缓存命中: song_id={}, checksum={}", &song_id[..std::cmp::min(20, song_id.len())], &save_checksum[..8]);
+            log::debug!(
+                "歌曲图片缓存命中: song_id={}, checksum={}",
+                &song_id[..std::cmp::min(20, song_id.len())],
+                &save_checksum[..8]
+            );
+            log::info!(
+                "歌曲图片生成 - 总耗时(缓存命中): {:?}",
+                start_time.elapsed()
+            );
             return Ok(cached.to_vec());
         }
 
         let image_bytes_arc = self
             .song_image_cache
             .try_get_with(cache_key, async {
+                let song_search_start = std::time::Instant::now();
                 let song_info = song_service.search_song(&song_query)?;
                 let song_id = song_info.id.clone();
                 let song_name = song_info.song.clone();
+                log::info!(
+                    "歌曲图片生成 - 歌曲信息获取耗时: {:?}",
+                    song_search_start.elapsed()
+                );
 
+                let data_fetch_start = std::time::Instant::now();
                 // 只在这里获取一次数据
                 let (rks_save_res, profile_res) = tokio::join!(
                     phigros_service.get_rks(&token),
                     phigros_service.get_profile(&token)
                 );
+                log::info!(
+                    "歌曲图片生成 - 数据获取耗时: {:?}",
+                    data_fetch_start.elapsed()
+                );
 
+                let data_process_start = std::time::Instant::now();
                 let (all_rks_result, save) = rks_save_res?;
                 let mut all_records = all_rks_result.records;
 
@@ -497,7 +590,12 @@ impl ImageService {
                         }),
                     );
                 }
+                log::info!(
+                    "歌曲图片生成 - 数据处理耗时: {:?}",
+                    data_process_start.elapsed()
+                );
 
+                let illustration_process_start = std::time::Instant::now();
                 let illustration_path_png = PathBuf::from(cover_loader::COVERS_DIR)
                     .join("ill")
                     .join(format!("{song_id}.png"));
@@ -511,7 +609,12 @@ impl ImageService {
                 } else {
                     None
                 };
+                log::info!(
+                    "歌曲图片生成 - 插画处理耗时: {:?}",
+                    illustration_process_start.elapsed()
+                );
 
+                let render_data_creation_start = std::time::Instant::now();
                 let render_data = SongRenderData {
                     song_name,
                     song_id: song_id.clone(),
@@ -520,14 +623,29 @@ impl ImageService {
                     difficulty_scores: difficulty_scores_map,
                     illustration_path,
                 };
+                log::info!(
+                    "歌曲图片生成 - RenderData创建耗时: {:?}",
+                    render_data_creation_start.elapsed()
+                );
 
+                let render_start = std::time::Instant::now();
                 let png_data = tokio::task::spawn_blocking(move || {
+                    let svg_gen_start = std::time::Instant::now();
                     let svg_string = image_renderer::generate_song_svg_string(&render_data)?;
-                    image_renderer::render_svg_to_png(svg_string)
+                    log::info!("歌曲图片生成 - SVG生成耗时: {:?}", svg_gen_start.elapsed());
+
+                    let png_render_start = std::time::Instant::now();
+                    let result = image_renderer::render_svg_to_png(svg_string);
+                    log::info!(
+                        "歌曲图片生成 - PNG渲染耗时: {:?}",
+                        png_render_start.elapsed()
+                    );
+                    result
                 })
                 .await
                 .map_err(|e| AppError::InternalError(format!("Blocking task join error: {e}")))?
                 .map_err(|e| AppError::InternalError(format!("SVG rendering error: {e}")))?;
+                log::info!("歌曲图片生成 - 渲染总耗时: {:?}", render_start.elapsed());
 
                 Ok(Arc::new(png_data))
             })
@@ -536,13 +654,21 @@ impl ImageService {
 
         // 记录缓存未命中（只有在try_get_with实际计算生成图片时才会执行到这里）
         self.song_cache_misses.fetch_add(1, AtomicOrdering::Relaxed);
-        log::debug!("歌曲图片缓存未命中: song_id={}, checksum={}", &song_id[..std::cmp::min(20, song_id.len())], &save_checksum[..8]);
-        
+        log::debug!(
+            "歌曲图片缓存未命中: song_id={}, checksum={}",
+            &song_id[..std::cmp::min(20, song_id.len())],
+            &save_checksum[..8]
+        );
+
         // 增加计数器
         if let Err(e) = self.increment_counter("song").await {
             log::error!("更新歌曲图片计数器失败: {e}");
         }
-        
+
+        log::info!(
+            "歌曲图片生成 - 总耗时(缓存未命中): {:?}",
+            start_time.elapsed()
+        );
         Ok(image_bytes_arc.to_vec())
     }
 
@@ -553,53 +679,93 @@ impl ImageService {
         limit: Option<usize>, // 显示多少名玩家，默认 20
         player_archive_service: web::Data<PlayerArchiveService>,
     ) -> Result<Vec<u8>, AppError> {
+        let start_time = std::time::Instant::now();
         let actual_limit = limit.unwrap_or(20).min(100);
-        
+
         // 获取排行榜更新时间用于缓存键
+        let last_update_start = std::time::Instant::now();
         let last_update = player_archive_service
             .get_ref()
             .get_latest_rks_update_time()
             .await
             .unwrap_or_else(|_| "unknown".to_string());
-        
+        log::info!(
+            "排行榜图片生成 - 获取更新时间耗时: {:?}",
+            last_update_start.elapsed()
+        );
+
         // 使用包含更新时间的缓存键
         let cache_key = (actual_limit, last_update.clone());
-        
+
         // 尝试从缓存获取
         if let Some(cached) = self.leaderboard_image_cache.get(&cache_key).await {
-            self.leaderboard_cache_hits.fetch_add(1, AtomicOrdering::Relaxed);
-            log::debug!("排行榜图片缓存命中: limit={}, update_time={}", actual_limit, &last_update[..std::cmp::min(10, last_update.len())]);
+            self.leaderboard_cache_hits
+                .fetch_add(1, AtomicOrdering::Relaxed);
+            log::debug!(
+                "排行榜图片缓存命中: limit={}, update_time={}",
+                actual_limit,
+                &last_update[..std::cmp::min(10, last_update.len())]
+            );
+            log::info!(
+                "排行榜图片生成 - 总耗时(缓存命中): {:?}",
+                start_time.elapsed()
+            );
             return Ok(cached.to_vec());
         }
-        
-        self.leaderboard_cache_misses.fetch_add(1, AtomicOrdering::Relaxed);
-        log::debug!("排行榜图片缓存未命中: limit={}, update_time={}", actual_limit, &last_update[..std::cmp::min(10, last_update.len())]);
+
+        self.leaderboard_cache_misses
+            .fetch_add(1, AtomicOrdering::Relaxed);
+        log::debug!(
+            "排行榜图片缓存未命中: limit={}, update_time={}",
+            actual_limit,
+            &last_update[..std::cmp::min(10, last_update.len())]
+        );
 
         let image_bytes_arc = self
             .leaderboard_image_cache
             .try_get_with(cache_key, async {
                 log::info!("生成RKS排行榜图片，显示前{actual_limit}名玩家");
 
+                let data_fetch_start = std::time::Instant::now();
                 let top_players = player_archive_service
                     .get_ref()
                     .get_rks_ranking(actual_limit)
                     .await?;
+                log::info!(
+                    "排行榜图片生成 - 数据获取耗时: {:?}",
+                    data_fetch_start.elapsed()
+                );
 
+                let render_data_creation_start = std::time::Instant::now();
                 let render_data = LeaderboardRenderData {
                     title: "RKS 排行榜".to_string(),
                     entries: top_players,
                     display_count: actual_limit,
                     update_time: Utc::now(),
                 };
+                log::info!(
+                    "排行榜图片生成 - RenderData创建耗时: {:?}",
+                    render_data_creation_start.elapsed()
+                );
 
+                let render_start = std::time::Instant::now();
                 let svg_string = image_renderer::generate_leaderboard_svg_string(&render_data)?;
 
-                let png_data = tokio::task::spawn_blocking(move || image_renderer::render_svg_to_png(svg_string))
-                    .await
-                    .map_err(|e| {
-                        AppError::InternalError(format!("Blocking task error for leaderboard: {e}"))
-                    })?
-                    .map_err(|e| AppError::InternalError(format!("SVG rendering error: {e}")))?;
+                let png_data = tokio::task::spawn_blocking(move || {
+                    let svg_render_start = std::time::Instant::now();
+                    let result = image_renderer::render_svg_to_png(svg_string);
+                    log::info!(
+                        "排行榜图片生成 - SVG渲染耗时: {:?}",
+                        svg_render_start.elapsed()
+                    );
+                    result
+                })
+                .await
+                .map_err(|e| {
+                    AppError::InternalError(format!("Blocking task error for leaderboard: {e}"))
+                })?
+                .map_err(|e| AppError::InternalError(format!("SVG rendering error: {e}")))?;
+                log::info!("排行榜图片生成 - 渲染总耗时: {:?}", render_start.elapsed());
 
                 Ok(Arc::new(png_data))
             })
@@ -611,6 +777,10 @@ impl ImageService {
             log::error!("更新排行榜图片计数器失败: {e}");
         }
 
+        log::info!(
+            "排行榜图片生成 - 总耗时(缓存未命中): {:?}",
+            start_time.elapsed()
+        );
         Ok(image_bytes_arc.to_vec())
     }
 }
@@ -618,26 +788,47 @@ impl ImageService {
 // 添加缓存统计方法
 impl ImageService {
     pub fn get_cache_stats(&self) -> serde_json::Value {
-        let bn_hits = self.bn_cache_hits.load(std::sync::atomic::Ordering::Relaxed);
-        let bn_misses = self.bn_cache_misses.load(std::sync::atomic::Ordering::Relaxed);
+        let bn_hits = self
+            .bn_cache_hits
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let bn_misses = self
+            .bn_cache_misses
+            .load(std::sync::atomic::Ordering::Relaxed);
         let bn_hit_rate = if bn_hits + bn_misses > 0 {
-            format!("{:.2}%", (bn_hits as f64 / (bn_hits + bn_misses) as f64) * 100.0)
+            format!(
+                "{:.2}%",
+                (bn_hits as f64 / (bn_hits + bn_misses) as f64) * 100.0
+            )
         } else {
             "0.00%".to_string()
         };
 
-        let song_hits = self.song_cache_hits.load(std::sync::atomic::Ordering::Relaxed);
-        let song_misses = self.song_cache_misses.load(std::sync::atomic::Ordering::Relaxed);
+        let song_hits = self
+            .song_cache_hits
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let song_misses = self
+            .song_cache_misses
+            .load(std::sync::atomic::Ordering::Relaxed);
         let song_hit_rate = if song_hits + song_misses > 0 {
-            format!("{:.2}%", (song_hits as f64 / (song_hits + song_misses) as f64) * 100.0)
+            format!(
+                "{:.2}%",
+                (song_hits as f64 / (song_hits + song_misses) as f64) * 100.0
+            )
         } else {
             "0.00%".to_string()
         };
 
-        let leaderboard_hits = self.leaderboard_cache_hits.load(std::sync::atomic::Ordering::Relaxed);
-        let leaderboard_misses = self.leaderboard_cache_misses.load(std::sync::atomic::Ordering::Relaxed);
+        let leaderboard_hits = self
+            .leaderboard_cache_hits
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let leaderboard_misses = self
+            .leaderboard_cache_misses
+            .load(std::sync::atomic::Ordering::Relaxed);
         let leaderboard_hit_rate = if leaderboard_hits + leaderboard_misses > 0 {
-            format!("{:.2}%", (leaderboard_hits as f64 / (leaderboard_hits + leaderboard_misses) as f64) * 100.0)
+            format!(
+                "{:.2}%",
+                (leaderboard_hits as f64 / (leaderboard_hits + leaderboard_misses) as f64) * 100.0
+            )
         } else {
             "0.00%".to_string()
         };
@@ -660,7 +851,7 @@ impl ImageService {
             }
         })
     }
-    
+
     // 增加图片生成计数
     async fn increment_counter(&self, image_type: &str) -> Result<(), AppError> {
         if let Some(ref pool) = self.db_pool {
@@ -674,34 +865,41 @@ impl ImageService {
         }
         Ok(())
     }
-    
+
     // 获取所有计数器统计信息
     pub async fn get_image_stats(&self) -> Result<serde_json::Value, AppError> {
         if let Some(ref pool) = self.db_pool {
-            let counters = sqlx::query_as!(crate::models::image_counter::ImageCounter,
+            let counters = sqlx::query_as!(
+                crate::models::image_counter::ImageCounter,
                 "SELECT id, image_type, count, last_updated FROM image_counter"
             )
             .fetch_all(pool)
             .await
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-            
+
             let mut stats = serde_json::Map::new();
             for counter in counters {
-                stats.insert(counter.image_type, serde_json::json!({
-                    "count": counter.count,
-                    "last_updated": counter.last_updated
-                }));
+                stats.insert(
+                    counter.image_type,
+                    serde_json::json!({
+                        "count": counter.count,
+                        "last_updated": counter.last_updated
+                    }),
+                );
             }
-            
+
             Ok(serde_json::Value::Object(stats))
         } else {
             // 如果没有数据库连接，返回空对象
             Ok(serde_json::json!({}))
         }
     }
-    
+
     // 获取特定类型的计数器统计信息
-    pub async fn get_image_stats_by_type(&self, image_type: &str) -> Result<Option<crate::models::image_counter::ImageCounter>, AppError> {
+    pub async fn get_image_stats_by_type(
+        &self,
+        image_type: &str,
+    ) -> Result<Option<crate::models::image_counter::ImageCounter>, AppError> {
         if let Some(ref pool) = self.db_pool {
             let counter = sqlx::query_as!(crate::models::image_counter::ImageCounter,
                 "SELECT id, image_type, count, last_updated FROM image_counter WHERE image_type = ?",
@@ -710,7 +908,7 @@ impl ImageService {
             .fetch_optional(pool)
             .await
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-            
+
             Ok(counter)
         } else {
             // 如果没有数据库连接，返回 None

@@ -67,7 +67,7 @@ pub struct ChartScore {
 
 impl ChartScore {
     /// 从RKS记录创建谱面成绩
-    /// 
+    ///
     /// # 参数
     /// * `record` - RKS记录
     /// * `is_fc` - 是否Full Combo
