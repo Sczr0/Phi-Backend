@@ -45,17 +45,17 @@ pub struct ImageService {
 impl ImageService {
     pub fn new() -> Self {
         Self {
-            // B-side图片缓存：最多缓存3000张，每张图片缓存20分钟
+            // B-side图片缓存：最多缓存3000张，每张图片缓存5分钟
             // 考虑到BN图片生成较重，增加缓存容量和时间
             bn_image_cache: Cache::builder()
                 .max_capacity(3000)
-                .time_to_live(Duration::from_secs(20 * 60))
+                .time_to_live(Duration::from_secs(5 * 60))
                 .build(),
-            // 歌曲图片缓存：最多缓存5000张，每张图片缓存20分钟
+            // 歌曲图片缓存：最多缓存5000张，每张图片缓存5分钟
             // 歌曲图片相对轻量，可以缓存更多
             song_image_cache: Cache::builder()
                 .max_capacity(5000)
-                .time_to_live(Duration::from_secs(20 * 60))
+                .time_to_live(Duration::from_secs(5 * 60))
                 .build(),
             // 排行榜图片缓存：最多缓存100张，每张图片缓存5分钟
             // 排行榜变化频繁，适当增加缓存时间和容量
