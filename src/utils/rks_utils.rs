@@ -105,7 +105,25 @@ pub fn calculate_target_chart_push_acc(
     {
         if let Some(cached_result) = PUSH_ACC_CACHE.read().unwrap().get(target_chart_id_full) {
             log::debug!("推分ACC缓存命中: {target_chart_id_full}");
-            return Some(*cached_result);
+
+            // 获取当前谱面的ACC，确保缓存的值仍然有效
+            let parts: Vec<&str> = target_chart_id_full.rsplitn(2, '-').collect();
+            if parts.len() == 2 {
+                let (song_id, difficulty) = (parts[1], parts[0]);
+                let current_acc = all_sorted_records
+                    .iter()
+                    .find(|r| r.song_id == song_id && r.difficulty == difficulty)
+                    .map_or(70.0, |r| r.acc);
+
+                // 验证缓存的值是否仍然有效
+                if *cached_result > current_acc {
+                    return Some(*cached_result);
+                } else {
+                    log::debug!("缓存的推分ACC({cached_result:.6})已不大于当前ACC({current_acc:.6})，清除缓存");
+                    // 清除无效缓存
+                    PUSH_ACC_CACHE.write().unwrap().remove(target_chart_id_full);
+                }
+            }
         }
     }
 
@@ -153,14 +171,18 @@ pub fn calculate_target_chart_push_acc(
         .find(|r| r.song_id == song_id && r.difficulty == difficulty)
         .map_or(70.0, |r| r.acc);
 
-    // 6. 二分查找最小达标ACC - 优化：减少迭代次数，提高精度
+    // 6. 二分查找最小达标ACC - 基于精度动态决定迭代次数
     let mut low = current_acc;
     let mut high = 100.0;
     log::debug!("开始二分查找推分ACC, 区间: [{low:.4}, {high:.4}]");
 
-    // 减少迭代次数，提高性能
-    for _ in 0..10 {
-        // 固定10次迭代，足够达到很高精度
+    // 精度要求：xx.xxxxx% (1e-7)
+    const ACC_PRECISION: f64 = 1e-7; // 精度为0.00001%
+    const MAX_ITERATIONS: usize = 50; // 最大迭代次数，避免无限循环
+
+    let mut iteration = 0;
+    while (high - low) > ACC_PRECISION && iteration < MAX_ITERATIONS {
+        iteration += 1;
         let mid = low + (high - low) / 2.0;
         let simulated_rks = simulate_rks_increase_simplified(
             target_chart_id_full,
@@ -174,18 +196,29 @@ pub fn calculate_target_chart_push_acc(
         } else {
             low = mid; // mid 不满足条件，需要更高的 acc
         }
+
+        log::debug!("迭代 {iteration}: 区间 [{low:.8}, {high:.8}], 区间长度: {:.8}", high - low);
     }
 
-    log::debug!("二分查找结束, 结果 high = {high:.6}");
+    log::debug!("二分查找结束, 迭代次数: {iteration}, 最终区间长度: {:.8}, 结果 high = {high:.8}", high - low);
 
-    // 7. 格式化结果，避免结果低于当前ACC
+    // 7. 格式化结果，确保推分ACC大于当前ACC
     let result_acc = high.max(current_acc);
-    // 向上取整到小数点后3位，平衡精度和性能
-    let final_acc = (result_acc * 1000.0).ceil() / 1000.0;
+
+    // 检查推分ACC是否真的大于当前ACC
+    let final_acc = if result_acc <= current_acc {
+        log::debug!("推分ACC计算结果({result_acc:.6})不大于当前ACC({current_acc:.6})，返回100.0");
+        100.0
+    } else {
+        // 向上取整到小数点后3位，平衡精度和性能
+        (result_acc * 1000.0).ceil() / 1000.0
+    };
 
     // 8. 存入缓存
     let result = final_acc.min(100.0);
-    {
+
+    // 只有当推分ACC确实大于当前ACC时才缓存
+    if result > current_acc {
         let mut cache = PUSH_ACC_CACHE.write().unwrap();
         if cache.len() >= PUSH_ACC_CACHE_SIZE {
             // 简单LRU：删除最旧的键
@@ -194,6 +227,8 @@ pub fn calculate_target_chart_push_acc(
             }
         }
         cache.insert(target_chart_id_full.to_string(), result);
+    } else {
+        log::debug!("推分ACC({result:.6})不大于当前ACC({current_acc:.6})，不存入缓存");
     }
 
     Some(result)
