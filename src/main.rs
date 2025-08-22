@@ -134,7 +134,8 @@ async fn main() -> std::io::Result<()> {
     log::info!("正在启动服务器 http://{host}:{port}");
     log::info!("API 文档位于 http://{host}:{port}/swagger-ui/");
 
-    HttpServer::new(move || {
+    // 1. 构建服务器实例，但不立即 .await 它
+    let server = HttpServer::new(move || {
         let cors = Cors::default()
             .allow_any_origin()
             .allow_any_method()
@@ -164,6 +165,31 @@ async fn main() -> std::io::Result<()> {
     })
     .shutdown_timeout(5)
     .bind((host, port))?
-    .run()
-    .await
+    .run();
+
+    // 2. 获取服务器的句柄，以便稍后我们可以向它发送停止命令
+    let server_handle = server.handle();
+
+    // 3. 将服务器的 future 放到一个单独的 Tokio 任务中运行
+    //    这样我们的 main 函数就不会被阻塞，可以继续执行下面的代码
+    tokio::spawn(server);
+
+    // 4. 等待关闭信号 (Ctrl+C 或 SIGTERM)
+    //    tokio::signal::ctrl_c() 会同时监听这两种信号
+    tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl-c signal");
+
+    log::info!("收到关闭信号, 正在关闭...");
+
+    // 5. 使用句柄来优雅地停止服务器
+    //    stop(true) 表示 graceful shutdown
+    server_handle.stop(true).await;
+
+    log::info!("服务器已停止。");
+
+    // 可以在这里添加任何其他的清理代码
+    // pool.close().await;
+    // log::info!("数据库连接池已关闭。");
+
+    log::info!("程序退出。");
+    Ok(())
 }
