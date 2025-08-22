@@ -699,7 +699,7 @@ pub fn generate_svg_string(
         .collect();
 
     if !filtered_background_files.is_empty() {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         if let Some(random_path) = filtered_background_files.choose(&mut rng) {
             // 随机选择一个路径
             // --- 新增：计算背景主色的反色 ---
@@ -1217,7 +1217,7 @@ pub fn generate_song_svg_string(data: &SongRenderData) -> Result<String, AppErro
     } else {
         // 如果找不到当前曲目的曲绘，则随机选一个
         if !cover_files.is_empty() {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             if let Some(random_path) = cover_files.as_slice().choose(&mut rng) {
                 // 使用缓存函数获取背景图片
                 if let Some(image_data) = get_background_image(random_path) {

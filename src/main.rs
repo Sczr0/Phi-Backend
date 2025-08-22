@@ -162,6 +162,7 @@ async fn main() -> std::io::Result<()> {
             )
             .configure(routes::configure)
     })
+    .shutdown_timeout(5)
     .bind((host, port))?
     .run()
     .await
