@@ -62,17 +62,19 @@ pub async fn generate_qr_code() -> impl Responder {
         Ok(data) => {
             let qr_code_data: TapTapQrCodeResponse = serde_json::from_value(data).unwrap();
             let qr_id = Uuid::new_v4().to_string();
-            let mut store = QR_CODE_STORE.lock().unwrap();
-            store.insert(
-                qr_id.clone(),
-                QrCodeState {
-                    device_code: qr_code_data.device_code.clone(),
-                    device_id: device_id.clone(),
-                    status: "pending".to_string(),
-                    session_token: None,
-                    created_at: chrono::Utc::now(),
-                },
-            );
+            {
+                let mut store = QR_CODE_STORE.lock().unwrap();
+                store.insert(
+                    qr_id.clone(),
+                    QrCodeState {
+                        device_code: qr_code_data.device_code.clone(),
+                        device_id: device_id.clone(),
+                        status: "pending".to_string(),
+                        session_token: None,
+                        created_at: chrono::Utc::now(),
+                    },
+                );
+            }
 
             let qr_id_clone = qr_id.clone();
             tokio::spawn(async move {

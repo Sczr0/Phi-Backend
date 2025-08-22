@@ -203,13 +203,16 @@ fn init_background_and_cover_cache() -> BackgroundAndCoverCache {
     )
 }
 
-/// 获取背景图片缓存和封面文件列表
-fn get_background_and_cover_cache() -> (
+/// 背景和封面缓存的类型别名
+type BackgroundAndCoverCacheRefs = (
     &'static std::sync::Mutex<LruCache<PathBuf, String>>,
     &'static Vec<PathBuf>,
     &'static std::sync::Mutex<HashMap<String, String>>,
     &'static std::sync::Mutex<std::collections::HashSet<PathBuf>>,
-) {
+);
+
+/// 获取背景图片缓存和封面文件列表
+fn get_background_and_cover_cache() -> BackgroundAndCoverCacheRefs {
     let (cache, files, metadata, cover_set) =
         BACKGROUND_AND_COVER_CACHE.get_or_init(init_background_and_cover_cache);
     (cache, files, metadata, cover_set)
@@ -301,7 +304,7 @@ fn generate_card_svg(info: CardRenderInfo) -> Result<(), AppError> {
         is_ap_score,
         pre_calculated_push_acc,
         all_sorted_records,
-        theme,
+        theme: _theme,
     } = info;
 
     // --- Card Dimensions & Layout ---
@@ -602,7 +605,7 @@ pub fn generate_svg_string(
     push_acc_map: Option<&HashMap<String, f64>>, // 新增：预先计算的推分ACC映射，键为"曲目ID-难度"
     theme: &crate::controllers::image::Theme,    // 新增：主题参数
 ) -> Result<String, AppError> {
-    let start_time = std::time::Instant::now();
+    let _start_time = std::time::Instant::now();
     // ... (width, height calculations etc. - keep these as they were) ...
     let width = 1200;
     let header_height = 120;

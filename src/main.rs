@@ -134,21 +134,6 @@ async fn main() -> std::io::Result<()> {
     log::info!("正在启动服务器 http://{host}:{port}");
     log::info!("API 文档位于 http://{host}:{port}/swagger-ui/");
 
-    // 启动定时任务，定期输出缓存统计信息
-    let image_service_clone = web::Data::new(ImageService::new().with_db_pool(pool.clone()));
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300)); // 每5分钟
-        loop {
-            interval.tick().await;
-            let stats = image_service_clone.get_cache_stats();
-            log::info!(
-                "图片缓存统计: {}",
-                serde_json::to_string_pretty(&stats)
-                    .unwrap_or_else(|_| "无法序列化统计信息".to_string())
-            );
-        }
-    });
-
     HttpServer::new(move || {
         let cors = Cors::default()
             .allow_any_origin()
