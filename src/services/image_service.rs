@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio;
+use tokio::{self, sync::Semaphore};
 
 // 添加用于缓存统计的原子计数器
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
@@ -40,10 +40,12 @@ pub struct ImageService {
     db_pool: Option<sqlx::SqlitePool>,
     // 推分ACC预计算缓存
     push_acc_cache: Cache<(String, String), f64>,
+    // 新增：用于限制并发图片渲染任务的信号量
+    render_semaphore: Arc<Semaphore>,
 }
 
 impl ImageService {
-    pub fn new() -> Self {
+    pub fn new(max_concurrent_renders: usize) -> Self {
         Self {
             // B-side图片缓存：最多缓存3000张，每张图片缓存5分钟
             // 考虑到BN图片生成较重，增加缓存容量和时间
@@ -78,6 +80,8 @@ impl ImageService {
             leaderboard_cache_misses: AtomicU64::new(0),
             // 数据库连接池初始化为 None，需要在创建服务时设置
             db_pool: None,
+            // 初始化信号量，限制并发渲染数量
+            render_semaphore: Arc::new(Semaphore::new(max_concurrent_renders)),
         }
     }
 
@@ -361,7 +365,21 @@ impl ImageService {
 
                 let render_start = std::time::Instant::now();
                 let theme_clone = theme.clone();
+
+                // 在进入spawn_blocking之前获取信号量许可
+                let permit = self
+                    .render_semaphore
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|e| {
+                        AppError::InternalError(format!("Failed to acquire semaphore permit: {e}"))
+                    })?;
+
                 let png_data = tokio::task::spawn_blocking(move || {
+                    // permit被移动到闭包中，当闭包结束时，permit会被drop，从而自动释放信号量
+                    let _permit = permit;
+
                     let svg_gen_start = std::time::Instant::now();
                     let svg_string = image_renderer::generate_svg_string(
                         &top_n_scores,
@@ -629,7 +647,20 @@ impl ImageService {
                 );
 
                 let render_start = std::time::Instant::now();
+                // 在进入spawn_blocking之前获取信号量许可
+                let permit = self
+                    .render_semaphore
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|e| {
+                        AppError::InternalError(format!("Failed to acquire semaphore permit: {e}"))
+                    })?;
+
                 let png_data = tokio::task::spawn_blocking(move || {
+                    // permit被移动到闭包中，当闭包结束时，permit会被drop，从而自动释放信号量
+                    let _permit = permit;
+
                     let svg_gen_start = std::time::Instant::now();
                     let svg_string = image_renderer::generate_song_svg_string(&render_data)?;
                     log::info!("歌曲图片生成 - SVG生成耗时: {:?}", svg_gen_start.elapsed());
@@ -751,7 +782,20 @@ impl ImageService {
                 let render_start = std::time::Instant::now();
                 let svg_string = image_renderer::generate_leaderboard_svg_string(&render_data)?;
 
+                // 在进入spawn_blocking之前获取信号量许可
+                let permit = self
+                    .render_semaphore
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|e| {
+                        AppError::InternalError(format!("Failed to acquire semaphore permit: {e}"))
+                    })?;
+
                 let png_data = tokio::task::spawn_blocking(move || {
+                    // permit被移动到闭包中，当闭包结束时，permit会被drop，从而自动释放信号量
+                    let _permit = permit;
+
                     let svg_render_start = std::time::Instant::now();
                     let result = image_renderer::render_svg_to_png(svg_string);
                     log::info!(

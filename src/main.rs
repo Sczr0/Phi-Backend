@@ -146,7 +146,15 @@ async fn main() -> std::io::Result<()> {
         let song_service = web::Data::new(SongService::new());
         let user_service = web::Data::new(UserService::new(pool.clone()));
         let player_archive_service = web::Data::new(player_archive_service.clone());
-        let image_service = web::Data::new(ImageService::new().with_db_pool(pool.clone()));
+        // 从环境变量读取并发限制，如果未设置则使用CPU核心数的一半作为默认值
+        let max_renders = env::var("MAX_CONCURRENT_RENDERS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or_else(|| (num_cpus::get() / 2).max(1)); // 至少为1
+        log::info!("图片渲染并发限制设置为: {}", max_renders);
+
+        let image_service =
+            web::Data::new(ImageService::new(max_renders).with_db_pool(pool.clone()));
 
         let openapi = ApiDoc::openapi();
 
