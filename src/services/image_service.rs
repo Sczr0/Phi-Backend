@@ -1,3 +1,4 @@
+use crate::models::cloud_save::FullSaveData;
 use crate::models::rks::RksRecord;
 use crate::models::user::IdentifierRequest;
 use crate::services::phigros::PhigrosService;
@@ -11,7 +12,7 @@ use crate::utils::image_renderer::{self, PlayerStats, SongDifficultyScore, SongR
 use crate::utils::rks_utils;
 use crate::utils::token_helper::resolve_token;
 use actix_web::web;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use moka::future::Cache;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -135,8 +136,8 @@ impl ImageService {
             .try_get_with(cache_key, async {
                 let data_fetch_start = std::time::Instant::now();
                 // 只在这里获取一次数据
-                let (rks_save_res, profile_res) = tokio::join!(
-                    phigros_service.get_rks(&token),
+                let (full_data_res, profile_res) = tokio::join!(
+                    phigros_service.get_full_save_data(&token),
                     phigros_service.get_profile(&token)
                 );
                 log::info!(
@@ -145,7 +146,11 @@ impl ImageService {
                 );
 
                 let data_process_start = std::time::Instant::now();
-                let (all_rks_result, save) = rks_save_res?;
+                let FullSaveData {
+                    rks_result: all_rks_result,
+                    save,
+                    cloud_summary,
+                } = full_data_res?;
                 if all_rks_result.records.is_empty() {
                     return Err(AppError::Other(format!(
                         "用户无成绩记录，无法生成 B{n} 图片"
@@ -351,7 +356,14 @@ impl ImageService {
                     best_27_avg,
                     real_rks: Some(exact_rks),
                     player_name: player_nickname,
-                    update_time: Utc::now(),
+                    update_time: {
+                        let date_str = cloud_summary["results"][0]["updatedAt"]
+                            .as_str()
+                            .unwrap_or_default();
+                        DateTime::parse_from_rfc3339(date_str)
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .unwrap_or_else(|_| Utc::now())
+                    },
                     n,
                     ap_top_3_scores,
                     challenge_rank,
@@ -491,8 +503,8 @@ impl ImageService {
 
                 let data_fetch_start = std::time::Instant::now();
                 // 只在这里获取一次数据
-                let (rks_save_res, profile_res) = tokio::join!(
-                    phigros_service.get_rks(&token),
+                let (full_data_res, profile_res) = tokio::join!(
+                    phigros_service.get_full_save_data(&token),
                     phigros_service.get_profile(&token)
                 );
                 log::info!(
@@ -501,7 +513,11 @@ impl ImageService {
                 );
 
                 let data_process_start = std::time::Instant::now();
-                let (all_rks_result, save) = rks_save_res?;
+                let FullSaveData {
+                    rks_result: all_rks_result,
+                    save,
+                    cloud_summary,
+                } = full_data_res?;
                 let mut all_records = all_rks_result.records;
 
                 let player_id = save
@@ -637,7 +653,14 @@ impl ImageService {
                     song_name,
                     song_id: song_id.clone(),
                     player_name: player_nickname,
-                    update_time: Utc::now(),
+                    update_time: {
+                        let date_str = cloud_summary["results"][0]["updatedAt"]
+                            .as_str()
+                            .unwrap_or_default();
+                        DateTime::parse_from_rfc3339(date_str)
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .unwrap_or_else(|_| Utc::now())
+                    },
                     difficulty_scores: difficulty_scores_map,
                     illustration_path,
                 };

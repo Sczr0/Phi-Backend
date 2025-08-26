@@ -123,8 +123,8 @@ pub async fn get_cloud_saves_with_difficulty(
 }
 /// 获取原始的云存档元数据 (saveInfo)
 ///
-/// 直接从 Phigros 服务器获取并返回原始的 `saveInfo` JSON 对象，
-/// 不进行任何处理。用于需要访问最原始数据的场景。
+/// 直接从 Phigros 服务器获取并返回原始的 `saveInfo` JSON 对象。
+/// 这个对象包含了存档文件的URL、校验和、更新时间等元数据。
 #[utoipa::path(
     post,
     path = "/get/cloud/saveInfo",

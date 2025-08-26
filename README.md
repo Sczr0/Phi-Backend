@@ -39,19 +39,19 @@
     cp .env.example .env
     # 然后按需修改 .env 中的配置
     ```
-    
+
     **配置说明**:
     ```dotenv
     # 数据库URL，默认使用项目根目录的SQLite文件
     DATABASE_URL=sqlite:phigros_bindings.db
-    
+
     # 服务器配置 (可选，有默认值)
     # HOST=127.0.0.1
     # PORT=8080
-    
+
     # 数据文件路径 (可选，默认使用项目根目录下的info文件夹)
     # INFO_DATA_PATH=info
-    
+
     # --- 维护模式配置 (可选) ---
     # 手动开启维护模式 (true/false)
     # MAINTENANCE_MODE=false
@@ -64,7 +64,7 @@
     # 例如，每天凌晨 2:00 (UTC) 开始的维护窗口
     # MAINTENANCE_CRON="0 0 2 * * *"
     ```
-    
+
     **注意**: `.env` 文件用于本地开发环境，不应提交到Git仓库。
 
 3.  **编译项目**
@@ -247,6 +247,12 @@
     -   成功响应 (`200 OK`): 返回包含 `difficulty` 和 `rks` 的 `GameSave` 结构。
     -   失败响应: `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
+-   **`POST /get/cloud/saveInfo`**
+    -   描述: 获取原始的云存档元数据 (`saveInfo`)。这个JSON对象包含了存档文件的URL、校验和、更新时间等，但不包含游戏存档本身的内容。
+    -   请求体: `IdentifierRequest`
+    -   成功响应 (`200 OK`): 返回原始的 `saveInfo` JSON对象。
+    -   失败响应: `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
+
 -   **`POST /rks`**
     -   描述: 计算并返回用户所有歌曲的RKS分数，按分数由高到低排序。
     -   请求体: `IdentifierRequest`
@@ -389,7 +395,7 @@
    # 确保Docker和Docker Compose已安装
    # 启动服务
    docker-compose up -d
-   
+
    # 查看日志
    docker-compose logs -f
    ```
@@ -403,10 +409,10 @@
    ```bash
    # 构建镜像
    docker build -t phi-backend .
-   
+
    # 创建数据目录
    mkdir -p data info
-   
+
    # 运行容器
    docker run -d --name phi-backend \
      -p 8080:8080 \

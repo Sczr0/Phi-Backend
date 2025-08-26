@@ -1,3 +1,4 @@
+use crate::models::cloud_save::FullSaveData;
 use crate::models::rks::RksResult;
 use crate::models::save::{GameSave, SongRecord};
 use crate::models::user::UserProfile;
@@ -44,42 +45,7 @@ impl PhigrosService {
         let save = self.get_save_with_difficulty(token).await?;
         log::debug!("get_rks: 已获取带难度信息的存档");
 
-        let game_record = save
-            .game_record
-            .as_ref()
-            .ok_or_else(|| AppError::Other("没有游戏记录数据".to_string()))?;
-        log::debug!(
-            "get_rks: 从存档中获取 GameRecord，包含 {} 首歌曲",
-            game_record.len()
-        );
-
-        let mut rks_records = Vec::new();
-
-        log::debug!("get_rks: 开始遍历 GameRecord 并创建 RksRecord 列表...");
-        for (song_id, difficulties) in game_record {
-            let song_name = crate::utils::data_loader::get_song_name_by_id(song_id)
-                .unwrap_or_else(|| song_id.clone());
-
-            for (diff_name, record) in difficulties {
-                if let (Some(acc), Some(difficulty)) = (record.acc, record.difficulty) {
-                    if acc >= 70.0 && difficulty > 0.0 {
-                        log::trace!("get_rks: 为 '{song_id}' - '{diff_name}' 创建 RksRecord");
-                        let rks_record = crate::models::rks::RksRecord::new(
-                            song_id.clone(),
-                            song_name.clone(),
-                            diff_name.clone(),
-                            difficulty,
-                            record,
-                        );
-                        rks_records.push(rks_record);
-                    }
-                }
-            }
-        }
-        log::debug!("get_rks: 共创建了 {} 条 RksRecord", rks_records.len());
-
-        log::debug!("get_rks: 调用 RksResult::new 进行排序和包装...");
-        let result = RksResult::new(rks_records);
+        let result = self.calculate_rks_from_save(&save)?;
         log::debug!(
             "get_rks: RksResult 创建完成，包含 {} 条记录",
             result.records.len()
@@ -124,7 +90,11 @@ impl PhigrosService {
         log::debug!("开始获取存档摘要...");
         let summary = self.fetch_summary(token).await?;
         log::debug!("成功获取存档摘要");
+        self.fetch_save_from_summary(&summary).await
+    }
 
+    // 新增的辅助函数，用于从已获取的摘要中下载并校验存档
+    async fn fetch_save_from_summary(&self, summary: &serde_json::Value) -> AppResult<Vec<u8>> {
         let url = summary["results"][0]["gameFile"]["url"]
             .as_str()
             .ok_or_else(|| AppError::Other("无法获取存档URL".to_string()))?;
@@ -264,5 +234,61 @@ impl PhigrosService {
             .ok_or_else(|| AppError::Other("无法获取存档校验和".to_string()))?
             .to_string();
         Ok(checksum)
+    }
+    // 新增：获取完整的存档数据，包括云端元数据
+    pub async fn get_full_save_data(&self, token: &str) -> AppResult<FullSaveData> {
+        log::debug!("开始获取完整的存档数据...");
+
+        // 1. 获取云端摘要 (只进行一次网络请求)
+        let summary = self.fetch_summary(token).await?;
+        log::debug!("成功获取云端摘要");
+
+        // 2. 从摘要中下载并校验存档
+        let save_data = self.fetch_save_from_summary(&summary).await?;
+        log::debug!("成功获取并校验存档二进制数据");
+
+        // 3. 解析存档并添加难度信息
+        let save = parse_save_with_difficulty(&save_data)?;
+        log::debug!("成功解析存档并添加难度信息");
+
+        // 4. 从解析后的存档计算RKS (复用get_rks的逻辑)
+        let rks_result = self.calculate_rks_from_save(&save)?;
+        log::debug!("成功计算RKS结果");
+
+        // 5. 封装并返回 FullSaveData
+        Ok(FullSaveData {
+            rks_result,
+            save,
+            cloud_summary: summary,
+        })
+    }
+
+    // 辅助函数：从已解析的GameSave中计算RKS
+    fn calculate_rks_from_save(&self, save: &GameSave) -> AppResult<RksResult> {
+        let game_record = save
+            .game_record
+            .as_ref()
+            .ok_or_else(|| AppError::Other("没有游戏记录数据".to_string()))?;
+
+        let mut rks_records = Vec::new();
+        for (song_id, difficulties) in game_record {
+            let song_name = crate::utils::data_loader::get_song_name_by_id(song_id)
+                .unwrap_or_else(|| song_id.clone());
+            for (diff_name, record) in difficulties {
+                if let (Some(acc), Some(difficulty)) = (record.acc, record.difficulty) {
+                    if acc >= 70.0 && difficulty > 0.0 {
+                        let rks_record = crate::models::rks::RksRecord::new(
+                            song_id.clone(),
+                            song_name.clone(),
+                            diff_name.clone(),
+                            difficulty,
+                            record,
+                        );
+                        rks_records.push(rks_record);
+                    }
+                }
+            }
+        }
+        Ok(RksResult::new(rks_records))
     }
 }

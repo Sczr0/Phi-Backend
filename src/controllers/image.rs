@@ -41,6 +41,7 @@ pub struct LeaderboardQuery {
 /// 生成Best N成绩图片
 ///
 /// 根据用户的RKS计算结果，生成一张包含其最好N项成绩的图片。
+/// 图片上显示的更新时间为用户云端存档的真实更新时间。
 #[utoipa::path(
     post,
     path = "/bn/{n}",
@@ -88,6 +89,7 @@ pub async fn generate_bn_image(
 /// 生成单曲成绩图片
 ///
 /// 根据用户成绩和歌曲信息，生成一张包含单曲成绩详情的图片。
+/// 图片上显示的更新时间为用户云端存档的真实更新时间。
 #[utoipa::path(
     post,
     path = "/song",
