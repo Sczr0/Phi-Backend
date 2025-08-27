@@ -145,7 +145,6 @@ impl ImageService {
                     data_fetch_start.elapsed()
                 );
 
-                let data_process_start = std::time::Instant::now();
                 let FullSaveData {
                     rks_result: all_rks_result,
                     save,
@@ -156,7 +155,6 @@ impl ImageService {
                         "用户无成绩记录，无法生成 B{n} 图片"
                     )));
                 }
-                let all_scores = all_rks_result.records;
 
                 let player_id = save
                     .user
@@ -166,11 +164,11 @@ impl ImageService {
                     .unwrap_or("unknown")
                     .to_string();
 
+                // --- Start of moved logic ---
+                // 异步更新玩家存档
                 let player_nickname = profile_res.ok().map(|p| p.nickname);
-
                 let player_name_for_archive =
                     player_nickname.clone().unwrap_or_else(|| player_id.clone());
-
                 let mut fc_map = HashMap::new();
                 if let Some(game_record_map) = &save.game_record {
                     for (song_id, difficulties) in game_record_map {
@@ -181,13 +179,11 @@ impl ImageService {
                         }
                     }
                 }
-
                 let archive_service_clone = player_archive_service.clone();
                 let player_id_clone = player_id.clone();
                 let player_name_clone = player_name_for_archive.clone();
-                let scores_clone = all_scores.clone();
+                let scores_clone = all_rks_result.records.clone();
                 let fc_map_clone = fc_map.clone();
-
                 tokio::spawn(async move {
                     if let Err(e) = archive_service_clone
                         .update_player_scores_from_rks_records(
@@ -203,63 +199,24 @@ impl ImageService {
                         );
                     }
                 });
+                // --- End of moved logic ---
 
-                let mut sorted_scores = all_scores;
-                sorted_scores.sort_by(|a, b| b.rks.partial_cmp(&a.rks).unwrap_or(Ordering::Equal));
-
-                let (exact_rks, _rounded_rks) =
-                    rks_utils::calculate_player_rks_details(&sorted_scores);
-
-                let top_n_scores = sorted_scores
+                // 预计算推分ACC
+                let push_acc_start = std::time::Instant::now();
+                let mut push_acc_map: HashMap<String, f64> = HashMap::new();
+                let mut sorted_scores_for_push = all_rks_result.records.clone();
+                sorted_scores_for_push.sort_by(|a, b| b.rks.partial_cmp(&a.rks).unwrap_or(Ordering::Equal));
+                let top_n_scores_for_push = sorted_scores_for_push
                     .iter()
                     .take(n as usize)
                     .cloned()
                     .collect::<Vec<_>>();
 
-                let ap_scores_ranked: Vec<_> =
-                    sorted_scores.iter().filter(|s| s.acc == 100.0).collect();
-                let ap_top_3_scores: Vec<RksRecord> = ap_scores_ranked
-                    .iter()
-                    .take(3)
-                    .map(|&s| s.clone())
-                    .collect();
-
-                let ap_top_3_avg = if ap_top_3_scores.len() >= 3 {
-                    Some(ap_top_3_scores.iter().map(|s| s.rks).sum::<f64>() / 3.0)
-                } else {
-                    None
-                };
-
-                let count_for_b27_display_avg = sorted_scores.len().min(27);
-                let best_27_avg = if count_for_b27_display_avg > 0 {
-                    Some(
-                        sorted_scores
-                            .iter()
-                            .take(count_for_b27_display_avg)
-                            .map(|s| s.rks)
-                            .sum::<f64>()
-                            / count_for_b27_display_avg as f64,
-                    )
-                } else {
-                    None
-                };
-                log::info!(
-                    "BN图片生成 - 数据处理耗时: {:?}",
-                    data_process_start.elapsed()
-                );
-
-                // 性能优化：对于未绑定的直接提供Token的用户，计算推分acc时只限制在规定范围内
-                // 比如渲染Bn图片时仅计算BestN以内的推分acc
-                // 优化：预计算推分ACC，利用服务层缓存减少重复计算
-                let push_acc_start = std::time::Instant::now();
-                let mut push_acc_map: HashMap<String, f64> = HashMap::new();
-                for score in top_n_scores
+                for score in top_n_scores_for_push
                     .iter()
                     .filter(|score| score.acc < 100.0 && score.difficulty_value > 0.0)
                 {
                     let target_chart_id_full = format!("{}-{}", score.song_id, score.difficulty);
-
-                    // 尝试从服务层缓存获取
                     if let Some(cached_push_acc) = self
                         .push_acc_cache
                         .get(&(target_chart_id_full.clone(), player_id.clone()))
@@ -267,13 +224,11 @@ impl ImageService {
                     {
                         push_acc_map.insert(target_chart_id_full.clone(), cached_push_acc);
                     } else {
-                        // 缓存未命中，重新计算
                         if let Some(push_acc) = rks_utils::calculate_target_chart_push_acc(
                             &target_chart_id_full,
                             score.difficulty_value,
-                            &top_n_scores,
+                            &top_n_scores_for_push,
                         ) {
-                            // 存入缓存
                             self.push_acc_cache
                                 .insert((target_chart_id_full.clone(), player_id.clone()), push_acc)
                                 .await;
@@ -286,97 +241,11 @@ impl ImageService {
                     push_acc_start.elapsed()
                 );
 
-                let challenge_data_start = std::time::Instant::now();
-                let (challenge_rank, data_string) = if let Some(game_progress) = &save.game_progress
-                {
-                    // 1. 解析课题等级
-                    let rank = game_progress
-                        .get("challengeModeRank")
-                        .and_then(|v| v.as_i64())
-                        .and_then(|rank_num| {
-                            if rank_num <= 0 {
-                                return None;
-                            }
-                            let rank_str = rank_num.to_string();
-                            if rank_str.is_empty() {
-                                return None;
-                            }
-                            let (color_char, level_str) = rank_str.split_at(1);
-                            let color = match color_char {
-                                "1" => "Green",
-                                "2" => "Blue",
-                                "3" => "Red",
-                                "4" => "Gold",
-                                "5" => "Rainbow",
-                                _ => return None,
-                            };
-                            Some((color.to_string(), level_str.to_string()))
-                        });
-
-                    // 2. 格式化Data
-                    let money_str = game_progress
-                        .get("money")
-                        .and_then(|v| v.as_array())
-                        .and_then(|arr| {
-                            let units = ["KB", "MB", "GB", "TB"];
-                            let mut parts: Vec<String> = arr
-                                .iter()
-                                .zip(units.iter())
-                                .filter_map(|(val, &unit)| {
-                                    val.as_u64().and_then(|u_val| {
-                                        if u_val > 0 {
-                                            Some(format!("{u_val} {unit}"))
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                })
-                                .collect();
-                            parts.reverse(); // 从大单位开始显示
-                            if parts.is_empty() {
-                                None
-                            } else {
-                                Some(format!("Data: {}", parts.join(", ")))
-                            }
-                        });
-
-                    (rank, money_str)
-                } else {
-                    (None, None)
-                };
-                log::info!(
-                    "BN图片生成 - 课题数据处理耗时: {:?}",
-                    challenge_data_start.elapsed()
-                );
-
-                let stats_creation_start = std::time::Instant::now();
-                let app_config = crate::utils::config::get_config()?;
-                let stats = PlayerStats {
-                    ap_top_3_avg,
-                    best_27_avg,
-                    real_rks: Some(exact_rks),
-                    player_name: player_nickname,
-                    update_time: {
-                        let date_str = cloud_summary["results"][0]["updatedAt"]
-                            .as_str()
-                            .unwrap_or_default();
-                        DateTime::parse_from_rfc3339(date_str)
-                            .map(|dt| dt.with_timezone(&Utc))
-                            .unwrap_or_else(|_| Utc::now())
-                    },
-                    n,
-                    ap_top_3_scores,
-                    challenge_rank,
-                    data_string,
-                    custom_footer_text: Some(app_config.custom_footer_text),
-                };
-                log::info!(
-                    "BN图片生成 - Stats创建耗时: {:?}",
-                    stats_creation_start.elapsed()
-                );
-
                 let render_start = std::time::Instant::now();
                 let theme_clone = theme.clone();
+                let all_scores = all_rks_result.records;
+                let save_clone = save.clone();
+                let cloud_summary_clone = cloud_summary.clone();
 
                 // 在进入spawn_blocking之前获取信号量许可
                 let permit = self
@@ -389,8 +258,99 @@ impl ImageService {
                     })?;
 
                 let png_data = tokio::task::spawn_blocking(move || {
-                    // permit被移动到闭包中，当闭包结束时，permit会被drop，从而自动释放信号量
-                    let _permit = permit;
+                    let _permit = permit; // Permit moved into closure
+
+                    let data_process_start = std::time::Instant::now();
+                    let mut sorted_scores = all_scores;
+                    sorted_scores
+                        .sort_by(|a, b| b.rks.partial_cmp(&a.rks).unwrap_or(Ordering::Equal));
+
+                    let (exact_rks, _rounded_rks) =
+                        rks_utils::calculate_player_rks_details(&sorted_scores);
+
+                    let top_n_scores = sorted_scores
+                        .iter()
+                        .take(n as usize)
+                        .cloned()
+                        .collect::<Vec<_>>();
+
+                    let ap_scores_ranked: Vec<_> =
+                        sorted_scores.iter().filter(|s| s.acc == 100.0).collect();
+                    let ap_top_3_scores: Vec<RksRecord> =
+                        ap_scores_ranked.iter().take(3).map(|&s| s.clone()).collect();
+
+                    let ap_top_3_avg = if ap_top_3_scores.len() >= 3 {
+                        Some(ap_top_3_scores.iter().map(|s| s.rks).sum::<f64>() / 3.0)
+                    } else {
+                        None
+                    };
+
+                    let count_for_b27_display_avg = sorted_scores.len().min(27);
+                    let best_27_avg = if count_for_b27_display_avg > 0 {
+                        Some(
+                            sorted_scores
+                                .iter()
+                                .take(count_for_b27_display_avg)
+                                .map(|s| s.rks)
+                                .sum::<f64>()
+                                / count_for_b27_display_avg as f64,
+                        )
+                    } else {
+                        None
+                    };
+
+                    let (challenge_rank, data_string) =
+                        if let Some(game_progress) = &save_clone.game_progress {
+                            let rank = game_progress
+                                .get("challengeModeRank")
+                                .and_then(|v| v.as_i64())
+                                .and_then(|rank_num| {
+                                    if rank_num <= 0 { return None; }
+                                    let rank_str = rank_num.to_string();
+                                    if rank_str.is_empty() { return None; }
+                                    let (color_char, level_str) = rank_str.split_at(1);
+                                    let color = match color_char {
+                                        "1" => "Green", "2" => "Blue", "3" => "Red",
+                                        "4" => "Gold", "5" => "Rainbow", _ => return None,
+                                    };
+                                    Some((color.to_string(), level_str.to_string()))
+                                });
+                            let money_str = game_progress.get("money").and_then(|v| v.as_array()).and_then(|arr| {
+                                let units = ["KB", "MB", "GB", "TB"];
+                                let mut parts: Vec<String> = arr.iter().zip(units.iter()).filter_map(|(val, &unit)| {
+                                    val.as_u64().and_then(|u_val| if u_val > 0 { Some(format!("{u_val} {unit}")) } else { None })
+                                }).collect();
+                                parts.reverse();
+                                if parts.is_empty() { None } else { Some(format!("Data: {}", parts.join(", "))) }
+                            });
+                            (rank, money_str)
+                        } else {
+                            (None, None)
+                        };
+                    log::info!("BN图片生成 - 数据处理耗时: {:?}", data_process_start.elapsed());
+
+                    let stats_creation_start = std::time::Instant::now();
+                    let app_config = crate::utils::config::get_config()?;
+                    let stats = PlayerStats {
+                        ap_top_3_avg,
+                        best_27_avg,
+                        real_rks: Some(exact_rks),
+                        player_name: player_nickname,
+                        update_time: {
+                            let date_str = cloud_summary_clone["results"][0]["updatedAt"]
+                                .as_str()
+                                .unwrap_or_default();
+                            DateTime::parse_from_rfc3339(date_str)
+                                .map(|dt| dt.with_timezone(&Utc))
+                                .unwrap_or_else(|_| Utc::now())
+                        },
+                        n,
+                        ap_top_3_scores,
+                        challenge_rank,
+                        data_string,
+                        custom_footer_text: Some(app_config.custom_footer_text),
+                    };
+                    log::info!("BN图片生成 - Stats创建耗时: {:?}", stats_creation_start.elapsed());
 
                     let svg_gen_start = std::time::Instant::now();
                     let svg_string = image_renderer::generate_svg_string(
@@ -512,14 +472,11 @@ impl ImageService {
                     data_fetch_start.elapsed()
                 );
 
-                let data_process_start = std::time::Instant::now();
                 let FullSaveData {
                     rks_result: all_rks_result,
                     save,
                     cloud_summary,
                 } = full_data_res?;
-                let mut all_records = all_rks_result.records;
-
                 let player_id = save
                     .user
                     .as_ref()
@@ -527,35 +484,33 @@ impl ImageService {
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown")
                     .to_string();
-
                 let player_nickname = profile_res.ok().map(|p| p.nickname);
+
+                // 异步更新玩家存档
                 let player_name_for_archive =
                     player_nickname.clone().unwrap_or_else(|| player_id.clone());
-
-                let fc_map: HashMap<String, bool> = if let Some(game_record_map) = &save.game_record
-                {
-                    game_record_map
-                        .iter()
-                        .flat_map(|(song_id, difficulties)| {
-                            difficulties.iter().filter_map(move |(diff_name, record)| {
-                                if record.fc == Some(true) {
-                                    Some((format!("{song_id}-{diff_name}"), true))
-                                } else {
-                                    None
-                                }
+                let fc_map: HashMap<String, bool> =
+                    if let Some(game_record_map) = &save.game_record {
+                        game_record_map
+                            .iter()
+                            .flat_map(|(song_id, difficulties)| {
+                                difficulties.iter().filter_map(move |(diff_name, record)| {
+                                    if record.fc == Some(true) {
+                                        Some((format!("{song_id}-{diff_name}"), true))
+                                    } else {
+                                        None
+                                    }
+                                })
                             })
-                        })
-                        .collect()
-                } else {
-                    HashMap::new()
-                };
-
+                            .collect()
+                    } else {
+                        HashMap::new()
+                    };
                 let archive_service_clone = player_archive_service.clone();
                 let player_id_clone = player_id.clone();
                 let player_name_clone = player_name_for_archive.clone();
-                let records_clone = all_records.clone();
+                let records_clone = all_rks_result.records.clone();
                 let fc_map_clone = fc_map.clone();
-
                 tokio::spawn(async move {
                     if let Err(e) = archive_service_clone
                         .update_player_scores_from_rks_records(
@@ -572,104 +527,12 @@ impl ImageService {
                     }
                 });
 
-                all_records.sort_by(|a, b| b.rks.partial_cmp(&a.rks).unwrap_or(Ordering::Equal));
-
-                let game_record_map = save.game_record.ok_or_else(|| {
-                    AppError::Other("存档中无成绩记录，无法生成单曲图片".to_string())
-                })?;
-                let song_difficulties_from_save =
-                    game_record_map.get(&song_id).cloned().unwrap_or_default();
-
-                let difficulty_constants = song_service.get_song_difficulty(&song_id)?;
-
-                let mut difficulty_scores_map = HashMap::new();
-                for diff_key in ["EZ", "HD", "IN", "AT"] {
-                    let difficulty_value = match diff_key {
-                        "EZ" => difficulty_constants.ez,
-                        "HD" => difficulty_constants.hd,
-                        "IN" => difficulty_constants.inl,
-                        "AT" => difficulty_constants.at,
-                        _ => None,
-                    };
-
-                    let record = song_difficulties_from_save.get(diff_key);
-                    let acc = record.and_then(|r| r.acc);
-                    let is_phi = acc == Some(100.0);
-
-                    let push_acc = if let Some(dv) = difficulty_value {
-                        if dv > 0.0 && !is_phi {
-                            let target_chart_id = format!("{song_id}-{diff_key}");
-                            rks_utils::calculate_target_chart_push_acc(
-                                &target_chart_id,
-                                dv,
-                                &all_records,
-                            )
-                        } else {
-                            Some(100.0)
-                        }
-                    } else {
-                        Some(100.0)
-                    };
-
-                    difficulty_scores_map.insert(
-                        diff_key.to_string(),
-                        Some(SongDifficultyScore {
-                            score: record.and_then(|r| r.score),
-                            acc,
-                            rks: record.and_then(|r| r.rks),
-                            difficulty_value,
-                            is_fc: record.and_then(|r| r.fc),
-                            is_phi: Some(is_phi),
-                            player_push_acc: push_acc,
-                        }),
-                    );
-                }
-                log::info!(
-                    "歌曲图片生成 - 数据处理耗时: {:?}",
-                    data_process_start.elapsed()
-                );
-
-                let illustration_process_start = std::time::Instant::now();
-                let illustration_path_png = PathBuf::from(cover_loader::COVERS_DIR)
-                    .join("ill")
-                    .join(format!("{song_id}.png"));
-                let illustration_path_jpg = PathBuf::from(cover_loader::COVERS_DIR)
-                    .join("ill")
-                    .join(format!("{song_id}.jpg"));
-                let illustration_path = if illustration_path_png.exists() {
-                    Some(illustration_path_png)
-                } else if illustration_path_jpg.exists() {
-                    Some(illustration_path_jpg)
-                } else {
-                    None
-                };
-                log::info!(
-                    "歌曲图片生成 - 插画处理耗时: {:?}",
-                    illustration_process_start.elapsed()
-                );
-
-                let render_data_creation_start = std::time::Instant::now();
-                let render_data = SongRenderData {
-                    song_name,
-                    song_id: song_id.clone(),
-                    player_name: player_nickname,
-                    update_time: {
-                        let date_str = cloud_summary["results"][0]["updatedAt"]
-                            .as_str()
-                            .unwrap_or_default();
-                        DateTime::parse_from_rfc3339(date_str)
-                            .map(|dt| dt.with_timezone(&Utc))
-                            .unwrap_or_else(|_| Utc::now())
-                    },
-                    difficulty_scores: difficulty_scores_map,
-                    illustration_path,
-                };
-                log::info!(
-                    "歌曲图片生成 - RenderData创建耗时: {:?}",
-                    render_data_creation_start.elapsed()
-                );
-
                 let render_start = std::time::Instant::now();
+                let all_records = all_rks_result.records;
+                let save_clone = save.clone();
+                let cloud_summary_clone = cloud_summary.clone();
+                let song_service_clone = song_service.clone();
+
                 // 在进入spawn_blocking之前获取信号量许可
                 let permit = self
                     .render_semaphore
@@ -681,8 +544,98 @@ impl ImageService {
                     })?;
 
                 let png_data = tokio::task::spawn_blocking(move || {
-                    // permit被移动到闭包中，当闭包结束时，permit会被drop，从而自动释放信号量
                     let _permit = permit;
+
+                    let data_process_start = std::time::Instant::now();
+                    let mut all_records_sorted = all_records;
+                    all_records_sorted
+                        .sort_by(|a, b| b.rks.partial_cmp(&a.rks).unwrap_or(Ordering::Equal));
+
+                    let game_record_map = save_clone.game_record.ok_or_else(|| {
+                        AppError::Other("存档中无成绩记录，无法生成单曲图片".to_string())
+                    })?;
+                    let song_difficulties_from_save =
+                        game_record_map.get(&song_id).cloned().unwrap_or_default();
+
+                    let difficulty_constants = song_service_clone.get_song_difficulty(&song_id)?;
+
+                    let mut difficulty_scores_map = HashMap::new();
+                    for diff_key in ["EZ", "HD", "IN", "AT"] {
+                        let difficulty_value = match diff_key {
+                            "EZ" => difficulty_constants.ez,
+                            "HD" => difficulty_constants.hd,
+                            "IN" => difficulty_constants.inl,
+                            "AT" => difficulty_constants.at,
+                            _ => None,
+                        };
+
+                        let record = song_difficulties_from_save.get(diff_key);
+                        let acc = record.and_then(|r| r.acc);
+                        let is_phi = acc == Some(100.0);
+
+                        let push_acc = if let Some(dv) = difficulty_value {
+                            if dv > 0.0 && !is_phi {
+                                let target_chart_id = format!("{song_id}-{diff_key}");
+                                rks_utils::calculate_target_chart_push_acc(
+                                    &target_chart_id,
+                                    dv,
+                                    &all_records_sorted,
+                                )
+                            } else {
+                                Some(100.0)
+                            }
+                        } else {
+                            Some(100.0)
+                        };
+
+                        difficulty_scores_map.insert(
+                            diff_key.to_string(),
+                            Some(SongDifficultyScore {
+                                score: record.and_then(|r| r.score),
+                                acc,
+                                rks: record.and_then(|r| r.rks),
+                                difficulty_value,
+                                is_fc: record.and_then(|r| r.fc),
+                                is_phi: Some(is_phi),
+                                player_push_acc: push_acc,
+                            }),
+                        );
+                    }
+                    log::info!("歌曲图片生成 - 数据处理耗时: {:?}", data_process_start.elapsed());
+
+                    let illustration_process_start = std::time::Instant::now();
+                    let illustration_path_png = PathBuf::from(cover_loader::COVERS_DIR)
+                        .join("ill")
+                        .join(format!("{song_id}.png"));
+                    let illustration_path_jpg = PathBuf::from(cover_loader::COVERS_DIR)
+                        .join("ill")
+                        .join(format!("{song_id}.jpg"));
+                    let illustration_path = if illustration_path_png.exists() {
+                        Some(illustration_path_png)
+                    } else if illustration_path_jpg.exists() {
+                        Some(illustration_path_jpg)
+                    } else {
+                        None
+                    };
+                    log::info!("歌曲图片生成 - 插画处理耗时: {:?}", illustration_process_start.elapsed());
+
+                    let render_data_creation_start = std::time::Instant::now();
+                    let render_data = SongRenderData {
+                        song_name,
+                        song_id: song_id.clone(),
+                        player_name: player_nickname,
+                        update_time: {
+                            let date_str = cloud_summary_clone["results"][0]["updatedAt"]
+                                .as_str()
+                                .unwrap_or_default();
+                            DateTime::parse_from_rfc3339(date_str)
+                                .map(|dt| dt.with_timezone(&Utc))
+                                .unwrap_or_else(|_| Utc::now())
+                        },
+                        difficulty_scores: difficulty_scores_map,
+                        illustration_path,
+                    };
+                    log::info!("歌曲图片生成 - RenderData创建耗时: {:?}", render_data_creation_start.elapsed());
 
                     let svg_gen_start = std::time::Instant::now();
                     let svg_string = image_renderer::generate_song_svg_string(&render_data)?;
@@ -690,10 +643,7 @@ impl ImageService {
 
                     let png_render_start = std::time::Instant::now();
                     let result = image_renderer::render_svg_to_png(svg_string);
-                    log::info!(
-                        "歌曲图片生成 - PNG渲染耗时: {:?}",
-                        png_render_start.elapsed()
-                    );
+                    log::info!("歌曲图片生成 - PNG渲染耗时: {:?}", png_render_start.elapsed());
                     result
                 })
                 .await
@@ -803,7 +753,6 @@ impl ImageService {
                 );
 
                 let render_start = std::time::Instant::now();
-                let svg_string = image_renderer::generate_leaderboard_svg_string(&render_data)?;
 
                 // 在进入spawn_blocking之前获取信号量许可
                 let permit = self
@@ -819,11 +768,19 @@ impl ImageService {
                     // permit被移动到闭包中，当闭包结束时，permit会被drop，从而自动释放信号量
                     let _permit = permit;
 
-                    let svg_render_start = std::time::Instant::now();
+                    let svg_gen_start = std::time::Instant::now();
+                    let svg_string =
+                        image_renderer::generate_leaderboard_svg_string(&render_data)?;
+                    log::info!(
+                        "排行榜图片生成 - SVG生成耗时: {:?}",
+                        svg_gen_start.elapsed()
+                    );
+
+                    let png_render_start = std::time::Instant::now();
                     let result = image_renderer::render_svg_to_png(svg_string);
                     log::info!(
-                        "排行榜图片生成 - SVG渲染耗时: {:?}",
-                        svg_render_start.elapsed()
+                        "排行榜图片生成 - PNG渲染耗时: {:?}",
+                        png_render_start.elapsed()
                     );
                     result
                 })

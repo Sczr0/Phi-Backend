@@ -11,6 +11,7 @@ phigros_bindings.db
 .cursor/
 .codebuddy/
 .claude/
+.roo/
 
 # 操作系统特定文件
 .DS_Store

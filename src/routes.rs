@@ -33,7 +33,8 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         // Song Search (Old/Compatible)
         .service(controllers::song::get_song_info) // GET /song/info
         .service(controllers::song::get_song_record) // POST /song/record
-        .service(controllers::status::get_status); // GET /status
+        .service(controllers::status::get_status) // GET /status
+        .service(controllers::health::health_check); // GET /health
 
     // 图片路由
     cfg.service(

@@ -94,6 +94,9 @@ pub enum AppError {
 
     #[error("内部错误: {0}")]
     InternalError(String),
+
+    #[error("请求超时")]
+    Timeout,
 }
 
 pub type AppResult<T> = Result<T, AppError>;
@@ -208,6 +211,10 @@ impl ResponseError for AppError {
             AppError::InternalError(_) => (
                 actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
+            ),
+            AppError::Timeout => (
+                actix_web::http::StatusCode::GATEWAY_TIMEOUT,
+                "request_timeout",
             ),
         };
 
