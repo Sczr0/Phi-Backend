@@ -72,7 +72,7 @@ fn simulate_rks_increase_simplified(
     // 3. 插入新记录
     simulated_records.push((simulated_chart_rks, test_acc >= 100.0));
 
-    // 4. 重新排序 (这是最关键的简化，虽然有排序开销，但比你之前复杂的逻辑更不易出错且通常足够快)
+    // 4. 重新排序 (这是最关键的简化，虽然有排序开销，但比之前复杂的逻辑更不易出错且通常足够快)
     simulated_records.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
 
     // 5. 重新计算 B27 和 AP3
@@ -99,7 +99,7 @@ pub fn calculate_target_chart_push_acc(
     target_chart_constant: f64,
     all_sorted_records: &[RksRecord], // 必须是已按RKS排序的Vec
 ) -> Option<f64> {
-    log::debug!("开始计算推分ACC (优化版): 目标谱面={target_chart_id_full}");
+    log::debug!("开始计算推分ACC: 目标谱面={target_chart_id_full}");
 
     // 1. 检查缓存
     {

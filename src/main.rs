@@ -151,7 +151,7 @@ async fn main() -> std::io::Result<()> {
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or_else(|| (num_cpus::get() / 2).max(1)); // 至少为1
-        log::info!("图片渲染并发限制设置为: {}", max_renders);
+        log::info!("图片渲染并发限制设置为: {max_renders}");
 
         let image_service =
             web::Data::new(ImageService::new(max_renders).with_db_pool(pool.clone()));
