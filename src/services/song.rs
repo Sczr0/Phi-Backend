@@ -9,8 +9,8 @@ pub struct SongService {
     id_to_song: std::collections::HashMap<String, SongInfo>,
     // 歌曲名到歌曲信息的映射（小写）
     name_to_song: std::collections::HashMap<String, SongInfo>,
-    // 别名到歌曲名的映射（小写）
-    nickname_to_song: std::collections::HashMap<String, String>,
+    // 别名到歌曲ID的映射（小写）
+    nickname_to_id: std::collections::HashMap<String, String>,
 }
 
 impl SongService {
@@ -18,7 +18,7 @@ impl SongService {
     pub fn new() -> Self {
         let mut id_to_song = std::collections::HashMap::new();
         let mut name_to_song = std::collections::HashMap::new();
-        let mut nickname_to_song = std::collections::HashMap::new();
+        let mut nickname_to_id = std::collections::HashMap::new();
 
         // 预处理数据，构建查找映射
         for song_info in SONG_INFO.iter() {
@@ -26,17 +26,28 @@ impl SongService {
             name_to_song.insert(song_info.song.to_lowercase(), song_info.clone());
         }
 
-        // 构建别名映射
-        for (song_name, nicknames) in SONG_NICKNAMES.iter() {
-            for nickname in nicknames {
-                nickname_to_song.insert(nickname.to_lowercase(), song_name.clone());
+        // 构建别名到ID的映射
+        for (key, nicknames) in SONG_NICKNAMES.iter() {
+            // 别名文件中的 key 可能是 歌曲名 或 歌曲ID
+            // 首先尝试按歌曲名查找，然后按ID查找
+            let song_id = name_to_song
+                .get(&key.to_lowercase())
+                .map(|info| info.id.clone())
+                .or_else(|| id_to_song.get(key).map(|info| info.id.clone()));
+
+            if let Some(id) = song_id {
+                for nickname in nicknames {
+                    nickname_to_id.insert(nickname.to_lowercase(), id.clone());
+                }
+            } else {
+                log::debug!("未找到别名列表 '{key}' 对应的歌曲");
             }
         }
 
         Self {
             id_to_song,
             name_to_song,
-            nickname_to_song,
+            nickname_to_id,
         }
     }
 
@@ -63,10 +74,10 @@ impl SongService {
         }
 
         // 3. 尝试作为别名精确查找 (O(1) 复杂度)
-        if let Some(song_name) = self.nickname_to_song.get(&query_lower) {
-            log::info!("通过别名精确匹配找到歌曲: {song_name} (别名: {query})");
-            // 通过歌曲名查找歌曲信息
-            if let Some(info) = self.name_to_song.get(&song_name.to_lowercase()) {
+        if let Some(song_id) = self.nickname_to_id.get(&query_lower) {
+            // 通过歌曲ID查找歌曲信息
+            if let Some(info) = self.id_to_song.get(song_id) {
+                log::info!("通过别名精确匹配找到歌曲: {} (别名: {query})", info.song);
                 return Ok(info.clone());
             }
         }
@@ -86,14 +97,12 @@ impl SongService {
 
         // 5. 尝试别名模糊匹配 (O(N) 复杂度，但只在必要时执行)
         let nickname_matches: Vec<_> = self
-            .nickname_to_song
+            .nickname_to_id
             .iter()
-            .filter_map(|(nickname, song_name)| {
+            .filter_map(|(nickname, song_id)| {
                 if nickname.contains(&query_lower) {
-                    // 通过歌曲名查找歌曲信息
-                    self.name_to_song
-                        .get(&song_name.to_lowercase())
-                        .map(|info| (info, nickname))
+                    // 通过歌曲ID查找歌曲信息
+                    self.id_to_song.get(song_id).map(|info| (info, nickname))
                 } else {
                     None
                 }
