@@ -31,30 +31,11 @@ pub async fn get_rks(
     user_service: web::Data<UserService>,
     player_archive_service: web::Data<PlayerArchiveService>,
 ) -> AppResult<HttpResponse> {
-    let token = resolve_token(&req, &user_service).await?;
-    check_session_token(&token)?;
+    let _token = resolve_token(&req, &user_service).await?;
+    check_session_token(&_token)?;
 
-    let (rks_save_res, profile_res) = tokio::join!(
-        phigros_service.get_rks(&token),
-        phigros_service.get_profile(&token)
-    );
-
-    let (rks_result, save) = rks_save_res?;
-
-    let player_id = save
-        .user
-        .as_ref()
-        .and_then(|u| u.get("objectId"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown")
-        .to_string();
-    let player_name = match profile_res {
-        Ok(profile) => profile.nickname,
-        Err(e) => {
-            log::warn!("获取用户 Profile 失败 (get_rks): {e}, 将使用 Player ID 作为名称");
-            player_id.clone()
-        }
-    };
+    let (rks_result, save, player_id, player_name) =
+        phigros_service.get_rks_with_source(&req).await?;
 
     let mut fc_map = HashMap::new();
     if let Some(game_record_map) = &save.game_record {
@@ -76,12 +57,17 @@ pub async fn get_rks(
 
     tokio::spawn(async move {
         log::info!("[后台任务] (get_rks) 开始为玩家 {player_name_clone} ({player_id_clone}) 更新数据库存档...");
-        match archive_service_clone.update_player_scores_from_rks_records(
-            &player_id_clone,
-            &player_name_clone,
-            &records_clone,
-            &fc_map_clone
-        ).await {
+        let is_external = req.data_source.as_deref() == Some("external");
+        match archive_service_clone
+            .update_player_scores_from_rks_records(
+                &player_id_clone,
+                &player_name_clone,
+                &records_clone,
+                &fc_map_clone,
+                is_external,
+            )
+            .await
+        {
             Ok(_) => log::info!("[后台任务] (get_rks) 玩家 {player_name_clone} ({player_id_clone}) 数据库存档更新完成。"),
             Err(e) => log::error!("[后台任务] (get_rks) 更新玩家 {player_name_clone} ({player_id_clone}) 数据库存档失败: {e}"),
         }
@@ -131,7 +117,7 @@ pub async fn get_bn(
 
     let token = resolve_token(&req, &user_service).await?;
 
-    let (rks_result, _) = phigros_service.get_rks(&token).await?;
+    let (rks_result, _, _, _) = phigros_service.get_rks_with_source(&req).await?;
 
     let bn = rks_result
         .records

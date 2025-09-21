@@ -34,7 +34,7 @@ pub async fn get_cloud_saves(
     check_session_token(&token)?;
 
     let (save_result, profile_result) = tokio::join!(
-        phigros_service.get_save(&token),
+        phigros_service.get_save_with_source(&req),
         phigros_service.get_profile(&token)
     );
 
@@ -110,9 +110,9 @@ pub async fn get_cloud_saves_with_difficulty(
 ) -> AppResult<HttpResponse> {
     debug!("接收到获取带难度定数的云存档请求");
 
-    let token = resolve_token(&req, &user_service).await?;
+    let _token = resolve_token(&req, &user_service).await?;
 
-    let save = phigros_service.get_save_with_difficulty(&token).await?;
+    let save = phigros_service.get_save_with_difficulty_and_source(&req).await?;
 
     Ok(HttpResponse::Ok().json(ApiResponse {
         code: 200,

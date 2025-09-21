@@ -36,12 +36,12 @@ pub async fn get_b30(
 
     // (优化后) 并行获取 RKS列表+存档 和 Profile
     let (rks_save_res, profile_res) = tokio::join!(
-        phigros_service.get_rks(&token),
+        phigros_service.get_rks_with_source(&req),
         phigros_service.get_profile(&token)
     );
 
     // 解包结果
-    let (rks_result, save) = rks_save_res?;
+    let (rks_result, save, _, _) = rks_save_res?;
 
     // 获取玩家ID和昵称
     let player_id = save
@@ -81,12 +81,17 @@ pub async fn get_b30(
 
     tokio::spawn(async move {
         log::info!("[后台任务] (get_b30) 开始为玩家 {player_name_clone} ({player_id_clone}) 更新数据库存档...");
-        match archive_service_clone.update_player_scores_from_rks_records(
-            &player_id_clone,
-            &player_name_clone,
-            &records_clone,
-            &fc_map_clone
-        ).await {
+        let is_external = req.data_source.as_deref() == Some("external");
+        match archive_service_clone
+            .update_player_scores_from_rks_records(
+                &player_id_clone,
+                &player_name_clone,
+                &records_clone,
+                &fc_map_clone,
+                is_external,
+            )
+            .await
+        {
             Ok(_) => log::info!("[后台任务] (get_b30) 玩家 {player_name_clone} ({player_id_clone}) 数据库存档更新完成。"),
             Err(e) => log::error!("[后台任务] (get_b30) 更新玩家 {player_name_clone} ({player_id_clone}) 数据库存档失败: {e}"),
         }

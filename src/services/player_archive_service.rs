@@ -59,13 +59,13 @@ impl PlayerArchiveService {
         let history_limit = self.config.history_max_records as i64;
         let query_sql = "
 WITH RankedScores AS (
-    SELECT 
+    SELECT
         *,
         ROW_NUMBER() OVER(PARTITION BY player_id, song_id, difficulty ORDER BY play_time DESC) as history_rank
     FROM chart_scores
     WHERE player_id = ?1
 )
-SELECT 
+SELECT
     pa.player_id,
     pa.player_name,
     pa.rks,
@@ -85,8 +85,8 @@ SELECT
     pa_push.push_acc
 FROM player_archives pa
 LEFT JOIN RankedScores rs ON pa.player_id = rs.player_id
-LEFT JOIN push_acc pa_push ON pa.player_id = pa_push.player_id 
-    AND rs.song_id = pa_push.song_id 
+LEFT JOIN push_acc pa_push ON pa.player_id = pa_push.player_id
+    AND rs.song_id = pa_push.song_id
     AND rs.difficulty = pa_push.difficulty
 WHERE pa.player_id = ?1 AND (rs.is_current = 1 OR rs.history_rank <= ?2 OR rs.song_id IS NULL)
 ORDER BY rs.play_time DESC;
@@ -318,6 +318,7 @@ ORDER BY rs.play_time DESC;
         player_name: &str,
         rks_records: &[RksRecord],
         fc_map: &HashMap<String, bool>,
+        is_external: bool,
     ) -> Result<(), AppError> {
         log::info!(
             "批量更新玩家[{}] ({}) 的成绩, 共{}条记录",
@@ -336,7 +337,7 @@ ORDER BY rs.play_time DESC;
 
         // 1. 更新或插入玩家信息
         query!(
-             "INSERT INTO player_archives (player_id, player_name, rks, update_time) VALUES (?, ?, ?, ?) 
+             "INSERT INTO player_archives (player_id, player_name, rks, update_time) VALUES (?, ?, ?, ?)
               ON CONFLICT(player_id) DO UPDATE SET player_name = excluded.player_name, update_time = excluded.update_time",
              player_id,
              player_name,
@@ -427,9 +428,11 @@ ORDER BY rs.play_time DESC;
             }
         });
 
-        // 5. 清除缓存
-        self.cache.invalidate(player_id).await;
-        log::debug!("玩家[{player_id}] ({player_name}) 缓存已清除");
+        // 5. 清除缓存 (仅限内部数据源)
+        if !is_external {
+            self.cache.invalidate(player_id).await;
+            log::debug!("玩家[{player_id}] ({player_name}) 缓存已清除");
+        }
 
         Ok(())
     }
@@ -447,8 +450,8 @@ ORDER BY rs.play_time DESC;
 
         // 获取所有当前成绩用于推分计算
         let all_scores: Vec<ChartScore> = query_as(
-            "SELECT song_id, song_name, difficulty, difficulty_value, score, acc, rks, is_fc, is_phi, play_time 
-             FROM chart_scores 
+            "SELECT song_id, song_name, difficulty, difficulty_value, score, acc, rks, is_fc, is_phi, play_time
+             FROM chart_scores
              WHERE player_id = ? AND is_current = 1"
         )
         .bind(player_id)
@@ -564,9 +567,9 @@ ORDER BY rs.play_time DESC;
         log::info!("获取RKS排行榜，显示前{limit}名玩家");
 
         let rows = sqlx::query(
-            "SELECT player_id, player_name, rks, update_time 
-             FROM player_archives 
-             ORDER BY rks DESC 
+            "SELECT player_id, player_name, rks, update_time
+             FROM player_archives
+             ORDER BY rks DESC
              LIMIT ?",
         )
         .bind(limit as i64)

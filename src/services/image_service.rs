@@ -105,14 +105,28 @@ impl ImageService {
         player_archive_service: web::Data<PlayerArchiveService>,
     ) -> Result<Vec<u8>, AppError> {
         let start_time = std::time::Instant::now();
-        let token = resolve_token(&identifier, &user_service).await?;
-        log::info!("BN图片生成 - Token解析耗时: {:?}", start_time.elapsed());
+        log::info!("BN图片生成 - 开始处理请求: {:?}", start_time.elapsed());
 
         let checksum_start = std::time::Instant::now();
-        let save_checksum = phigros_service
-            .get_save_checksum(&token)
-            .await
-            .unwrap_or_else(|_| "unknown".to_string());
+        let save_checksum = if identifier.data_source.as_deref() == Some("external") {
+            // 外部数据源：使用平台和ID生成唯一校验和
+            if let Some(api_user_id) = &identifier.api_user_id {
+                format!("external_api_{}", api_user_id)
+            } else {
+                format!(
+                    "external_{}_{}",
+                    identifier.platform.as_deref().unwrap_or(""),
+                    identifier.platform_id.as_deref().unwrap_or("")
+                )
+            }
+        } else {
+            // 内部数据源使用token获取校验和
+            let token = resolve_token(&identifier, &user_service).await?;
+            phigros_service
+                .get_save_checksum(&token)
+                .await
+                .unwrap_or_else(|_| "unknown".to_string())
+        };
         log::info!(
             "BN图片生成 - 获取存档校验和耗时: {:?}",
             checksum_start.elapsed()
@@ -131,10 +145,25 @@ impl ImageService {
             .bn_image_cache
             .try_get_with(cache_key, async {
                 let data_fetch_start = std::time::Instant::now();
-                let (full_data_res, profile_res) = tokio::join!(
-                    phigros_service.get_full_save_data(&token),
-                    phigros_service.get_profile(&token)
-                );
+                let (full_data_res, profile_res) = if identifier.data_source.as_deref() == Some("external") {
+                    // 使用外部数据源
+                    tokio::join!(
+                        phigros_service.get_full_save_data_with_source(&identifier),
+                        async { Ok(crate::models::user::UserProfile {
+                            object_id: "external".to_string(),
+                            nickname: identifier.platform.as_ref()
+                                .map(|p| format!("{}:{}", p, identifier.platform_id.as_ref().unwrap_or(&"unknown".to_string())))
+                                .unwrap_or_else(|| "External User".to_string())
+                        }) }
+                    )
+                } else {
+                    // 使用内部数据源
+                    let token = resolve_token(&identifier, &user_service).await?;
+                    tokio::join!(
+                        phigros_service.get_full_save_data(&token),
+                        phigros_service.get_profile(&token)
+                    )
+                };
                 log::info!(
                     "BN图片生成 - 数据获取耗时: {:?}",
                     data_fetch_start.elapsed()
@@ -147,20 +176,35 @@ impl ImageService {
                     )));
                 }
 
-                let player_id = full_data
-                    .save
-                    .user
-                    .as_ref()
-                    .and_then(|u| u.get("objectId"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-
                 let player_nickname = profile_res.ok().map(|p| p.nickname);
 
+                let (player_id, player_name) = if identifier.data_source.as_deref() == Some("external") {
+                    // 外部数据源：从外部API响应中获取PlayerId和玩家名称
+                    let player_id = full_data.cloud_summary["results"][0]["PlayerId"]
+                        .as_str()
+                        .unwrap_or("external:unknown")
+                        .to_string();
+                    let player_name = full_data.cloud_summary["results"][0]["PlayerId"]
+                        .as_str()
+                        .unwrap_or("external:unknown")
+                        .to_string();
+                    (player_id, player_name)
+                } else {
+                    // 内部数据源：从存档数据中获取objectId和玩家名称
+                    let player_id = full_data
+                        .save
+                        .user
+                        .as_ref()
+                        .and_then(|u| u.get("objectId"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let player_name = player_nickname.clone().unwrap_or(player_id.clone());
+                    (player_id, player_name)
+                };
+
                 // --- 异步更新玩家存档 ---
-                let player_name_for_archive =
-                    player_nickname.clone().unwrap_or_else(|| player_id.clone());
+                let player_name_for_archive = player_name.clone();
                 let mut fc_map = HashMap::new();
                 if let Some(game_record_map) = &full_data.save.game_record {
                     for (song_id, difficulties) in game_record_map {
@@ -175,6 +219,7 @@ impl ImageService {
                 let player_id_clone = player_id.clone();
                 let player_name_clone = player_name_for_archive.clone();
                 let scores_clone = full_data.rks_result.records.clone();
+                let is_external = identifier.data_source.as_deref() == Some("external");
                 tokio::spawn(async move {
                     if let Err(e) = archive_service_clone
                         .update_player_scores_from_rks_records(
@@ -182,6 +227,7 @@ impl ImageService {
                             &player_name_clone,
                             &scores_clone,
                             &fc_map,
+                            is_external,
                         )
                         .await
                     {
@@ -233,7 +279,7 @@ impl ImageService {
                     let _permit = permit;
                     Self::_render_bn_image_sync(
                         full_data,
-                        player_nickname,
+                        Some(player_name),
                         n,
                         push_acc_map,
                         theme_clone,
@@ -271,7 +317,7 @@ impl ImageService {
     /// 同步执行的BN图片渲染函数
     fn _render_bn_image_sync(
         full_data: FullSaveData,
-        player_nickname: Option<String>,
+        player_name: Option<String>,
         n: u32,
         push_acc_map: HashMap<String, f64>,
         theme: crate::controllers::image::Theme,
@@ -344,7 +390,7 @@ impl ImageService {
             ap_top_3_avg,
             best_27_avg,
             real_rks: Some(exact_rks),
-            player_name: player_nickname,
+            player_name,
             update_time: {
                 let date_str = full_data.cloud_summary["results"][0]["updatedAt"]
                     .as_str()
@@ -387,16 +433,30 @@ impl ImageService {
         player_archive_service: web::Data<PlayerArchiveService>,
     ) -> Result<Vec<u8>, AppError> {
         let start_time = std::time::Instant::now();
-        let token = resolve_token(&identifier, &user_service).await?;
-        log::info!("歌曲图片生成 - Token解析耗时: {:?}", start_time.elapsed());
+        log::info!("歌曲图片生成 - 开始处理请求: {:?}", start_time.elapsed());
 
         let song_info = song_service.search_song(&song_query)?;
         let song_id = song_info.id.clone();
 
-        let save_checksum = phigros_service
-            .get_save_checksum(&token)
-            .await
-            .unwrap_or_else(|_| "unknown".to_string());
+        let save_checksum = if identifier.data_source.as_deref() == Some("external") {
+            // 外部数据源：使用平台和ID生成唯一校验和
+            if let Some(api_user_id) = &identifier.api_user_id {
+                format!("external_api_{}", api_user_id)
+            } else {
+                format!(
+                    "external_{}_{}",
+                    identifier.platform.as_deref().unwrap_or(""),
+                    identifier.platform_id.as_deref().unwrap_or("")
+                )
+            }
+        } else {
+            // 内部数据源使用token获取校验和
+            let token = resolve_token(&identifier, &user_service).await?;
+            phigros_service
+                .get_save_checksum(&token)
+                .await
+                .unwrap_or_else(|_| "unknown".to_string())
+        };
 
         let cache_key = (song_id.clone(), save_checksum.clone());
 
@@ -417,25 +477,55 @@ impl ImageService {
         let image_bytes_arc = self
             .song_image_cache
             .try_get_with(cache_key, async {
-                let (full_data_res, profile_res) = tokio::join!(
-                    phigros_service.get_full_save_data(&token),
-                    phigros_service.get_profile(&token)
-                );
+                let (full_data_res, profile_res) = if identifier.data_source.as_deref() == Some("external") {
+                    // 使用外部数据源
+                    tokio::join!(
+                        phigros_service.get_full_save_data_with_source(&identifier),
+                        async { Ok(crate::models::user::UserProfile {
+                            object_id: "external".to_string(),
+                            nickname: identifier.platform.as_ref()
+                                .map(|p| format!("{}:{}", p, identifier.platform_id.as_ref().unwrap_or(&"unknown".to_string())))
+                                .unwrap_or_else(|| "External User".to_string())
+                        }) }
+                    )
+                } else {
+                    // 使用内部数据源
+                    let token = resolve_token(&identifier, &user_service).await?;
+                    tokio::join!(
+                        phigros_service.get_full_save_data(&token),
+                        phigros_service.get_profile(&token)
+                    )
+                };
 
                 let full_data = full_data_res?;
                 let player_nickname = profile_res.ok().map(|p| p.nickname);
-                let player_id = full_data
-                    .save
-                    .user
-                    .as_ref()
-                    .and_then(|u| u.get("objectId"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-                    .to_string();
+                let (player_id, player_name) = if identifier.data_source.as_deref() == Some("external") {
+                    // 外部数据源：从外部API响应中获取PlayerId和玩家名称
+                    let player_id = full_data.cloud_summary["results"][0]["PlayerId"]
+                        .as_str()
+                        .unwrap_or("external:unknown")
+                        .to_string();
+                    let player_name = full_data.cloud_summary["results"][0]["PlayerId"]
+                        .as_str()
+                        .unwrap_or("external:unknown")
+                        .to_string();
+                    (player_id, player_name)
+                } else {
+                    // 内部数据源：从存档数据中获取objectId和玩家名称
+                    let player_id = full_data
+                        .save
+                        .user
+                        .as_ref()
+                        .and_then(|u| u.get("objectId"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let player_name = player_nickname.unwrap_or(player_id.clone());
+                    (player_id, player_name)
+                };
 
                 // --- 异步更新玩家存档 ---
-                let player_name_for_archive =
-                    player_nickname.clone().unwrap_or_else(|| player_id.clone());
+                let player_name_for_archive = player_name.clone();
                 let fc_map: HashMap<String, bool> =
                     if let Some(game_record_map) = &full_data.save.game_record {
                         game_record_map
@@ -457,6 +547,7 @@ impl ImageService {
                 let player_id_clone = player_id.clone();
                 let player_name_clone = player_name_for_archive.clone();
                 let records_clone = full_data.rks_result.records.clone();
+                let is_external = identifier.data_source.as_deref() == Some("external");
                 tokio::spawn(async move {
                     if let Err(e) = archive_service_clone
                         .update_player_scores_from_rks_records(
@@ -464,6 +555,7 @@ impl ImageService {
                             &player_name_clone,
                             &records_clone,
                             &fc_map,
+                            is_external,
                         )
                         .await
                     {
@@ -483,7 +575,7 @@ impl ImageService {
                     let _permit = permit;
                     Self::_render_song_image_sync(
                         full_data,
-                        player_nickname,
+                        Some(player_name),
                         song_info,
                         song_service_clone,
                     )
@@ -520,7 +612,7 @@ impl ImageService {
     /// 同步执行的单曲图片渲染函数
     fn _render_song_image_sync(
         full_data: FullSaveData,
-        player_nickname: Option<String>,
+        player_name: Option<String>,
         song_info: crate::models::song::SongInfo,
         song_service: web::Data<SongService>,
     ) -> Result<Vec<u8>, AppError> {
@@ -600,7 +692,7 @@ impl ImageService {
         let render_data = SongRenderData {
             song_name: song_info.song,
             song_id: song_info.id,
-            player_name: player_nickname,
+            player_name: player_name,
             update_time: {
                 let date_str = full_data.cloud_summary["results"][0]["updatedAt"]
                     .as_str()

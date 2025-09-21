@@ -73,7 +73,11 @@ pub struct IdentifierRequest {
     pub token: Option<String>,
     pub platform: Option<String>,
     pub platform_id: Option<String>,
+    pub api_user_id: Option<String>,
+    pub api_token: Option<String>,
     pub verification_code: Option<String>,
+    #[serde(default)]
+    pub data_source: Option<String>, // "internal" 或 "external"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

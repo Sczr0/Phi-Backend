@@ -85,9 +85,9 @@ pub async fn search_song_record(
     debug!("接收到歌曲记录搜索请求: q={q}, difficulty={difficulty:?}");
 
     let song_id = song_service.get_song_id(q)?;
-    let token = resolve_token(&req, &user_service).await?;
+    let _token = resolve_token(&req, &user_service).await?;
     let song_records = phigros_service
-        .get_song_record(&token, &song_id, difficulty)
+        .get_song_record_with_source(&req, &song_id, difficulty)
         .await?;
 
     Ok(HttpResponse::Ok().json(ApiResponse {
@@ -184,9 +184,9 @@ pub async fn get_song_record(
     };
 
     let difficulty = query.difficulty.as_deref();
-    let token = resolve_token(&req, &user_service).await?;
+    let _token = resolve_token(&req, &user_service).await?;
     let song_records = phigros_service
-        .get_song_record(&token, &song_id, difficulty)
+        .get_song_record_with_source(&req, &song_id, difficulty)
         .await?;
 
     Ok(HttpResponse::Ok().json(ApiResponse {
