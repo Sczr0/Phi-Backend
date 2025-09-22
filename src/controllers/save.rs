@@ -31,13 +31,19 @@ pub async fn get_cloud_saves(
     user_service: web::Data<UserService>,
 ) -> AppResult<HttpResponse> {
     let (save_result, profile_result) = if req.data_source.as_deref() == Some("external") {
-        // 外部数据源：直接获取存档，不需要profile
-        let save_result = phigros_service.get_save_with_source(&req).await;
+        // 外部数据源：获取完整存档数据以获得nickname
+        let full_data = phigros_service.get_full_save_data_with_source(&req).await?;
+        let save_result = Ok(full_data.save);
+
+        // 从外部数据源获取nickname
+        let nickname = full_data.cloud_summary["results"][0]["nickname"]
+            .as_str()
+            .unwrap_or("External User")
+            .to_string();
+
         (save_result, Ok(crate::models::user::UserProfile {
             object_id: "external".to_string(),
-            nickname: req.platform.as_ref()
-                .map(|p| format!("{}:{}", p, req.platform_id.as_ref().unwrap_or(&"unknown".to_string())))
-                .unwrap_or_else(|| "External User".to_string())
+            nickname
         }))
     } else {
         // 内部数据源：并行获取数据
