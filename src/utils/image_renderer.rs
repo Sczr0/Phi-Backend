@@ -31,6 +31,7 @@ pub struct PlayerStats {
     pub challenge_rank: Option<(String, String)>, // 新增：课题等级 (颜色, 等级)
     pub data_string: Option<String>,              // 新增：格式化后的Data字符串
     pub custom_footer_text: Option<String>,
+    pub is_user_generated: bool, // 新增：标记是否为用户生成
 }
 
 // 新增：单曲成绩渲染所需数据结构
@@ -287,6 +288,7 @@ struct CardRenderInfo<'a> {
     pre_calculated_push_acc: Option<f64>,
     all_sorted_records: &'a [RksRecord],
     theme: &'a crate::controllers::image::Theme,
+    is_user_generated: bool, // 新增
 }
 
 fn generate_card_svg(info: CardRenderInfo) -> Result<(), AppError> {
@@ -305,6 +307,7 @@ fn generate_card_svg(info: CardRenderInfo) -> Result<(), AppError> {
         pre_calculated_push_acc,
         all_sorted_records,
         theme: _theme,
+        is_user_generated,
     } = info;
 
     // --- Card Dimensions & Layout ---
@@ -458,6 +461,23 @@ fn generate_card_svg(info: CardRenderInfo) -> Result<(), AppError> {
         r#"<text x="{text_x}" y="{score_y:.1}" class="text-score">{score_text}</text>"#
     )
     .map_err(fmt_err)?;
+
+    // 如果是用户生成的数据，在分数旁边添加 "U" 标签
+    if is_user_generated {
+        // 方案: 将 "U" 标签放在序号的左边
+        let u_badge_width = 18.0;
+        let u_badge_height = 18.0;
+        let u_badge_radius = 4.0;
+
+        // 序号的 x 坐标是 card_width - card_padding
+        // 我们将 U 标签放在序号左边，并留出一些间距
+        let rank_text_approx_width = 30.0; // 估算 "#10" 这种文本的宽度
+        let u_badge_x = (card_width as f64) - card_padding - rank_text_approx_width - u_badge_width - 5.0;
+        let u_badge_y = level_y - u_badge_height + 4.0; // 与序号的基线对齐 (向下微调2px)
+
+        writeln!(svg, r#"<rect x='{u_badge_x}' y='{u_badge_y}' width='{u_badge_width}' height='{u_badge_height}' rx='{u_badge_radius}' ry='{u_badge_radius}' fill='#888888' />"#).map_err(fmt_err)?;
+        writeln!(svg, r#"<text x="{}" y="{}" class="text-fc-ap-badge" text-anchor="middle" fill="white">U</text>"#, u_badge_x + u_badge_width / 2.0, u_badge_y + u_badge_height / 2.0 + 4.0).map_err(fmt_err)?;
+    }
 
     // Accuracy (带推分acc)
     let acc_text = if !is_ap_score && score.acc < 100.0 && score.difficulty_value > 0.0 {
@@ -994,6 +1014,7 @@ pub fn generate_svg_string(
                 pre_calculated_push_acc: push_acc,
                 all_sorted_records: scores,
                 theme,
+                is_user_generated: stats.is_user_generated,
             })?
         }
         writeln!(svg, r#"</g>"#).map_err(fmt_err)?;
@@ -1028,6 +1049,7 @@ pub fn generate_svg_string(
             pre_calculated_push_acc: push_acc,
             all_sorted_records: scores,
             theme,
+            is_user_generated: stats.is_user_generated,
         })?
     }
 
@@ -1065,7 +1087,7 @@ pub fn generate_svg_string(
 }
 
 // ... (render_svg_to_png function - unchanged) ...
-pub fn render_svg_to_png(svg_data: String) -> Result<Vec<u8>, AppError> {
+pub fn render_svg_to_png(svg_data: String, is_user_generated: bool) -> Result<Vec<u8>, AppError> {
     // 使用全局字体数据库
     let font_db = get_global_font_db(); // 获取字体数据库
 
@@ -1095,9 +1117,29 @@ pub fn render_svg_to_png(svg_data: String) -> Result<Vec<u8>, AppError> {
 
     render(&tree, Transform::default(), &mut pixmap.as_mut());
 
-    pixmap
+    let mut png_data = pixmap
         .encode_png()
-        .map_err(|e| AppError::InternalError(format!("Failed to encode PNG: {e}")))
+        .map_err(|e| AppError::InternalError(format!("Failed to encode PNG: {e}")))?;
+
+    // 如果是用户生成的数据，添加隐式水印
+    if is_user_generated {
+        use image::{ImageBuffer, Rgba};
+        let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> = image::load_from_memory(&png_data)
+            .map_err(|e| AppError::InternalError(format!("Failed to decode PNG for watermarking: {e}")))?
+            .to_rgba8();
+
+        if img.width() > 0 && img.height() > 0 {
+            // 在 (0, 0) 像素点设置一个特定的颜色作为指纹
+            img.put_pixel(0, 0, Rgba([0x01, 0x02, 0x03, 0xFF]));
+        }
+
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut cursor, image::ImageFormat::Png)
+            .map_err(|e| AppError::InternalError(format!("Failed to re-encode PNG after watermarking: {e}")))?;
+        png_data = cursor.into_inner();
+    }
+
+    Ok(png_data)
 }
 
 // ... (escape_xml function - unchanged) ...

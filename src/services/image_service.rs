@@ -404,6 +404,7 @@ impl ImageService {
             challenge_rank,
             data_string,
             custom_footer_text: Some(app_config.custom_footer_text),
+            is_user_generated: false, // 官方数据
         };
         log::info!("BN图片生成 - Stats创建耗时: {:?}", stats_creation_start.elapsed());
 
@@ -417,7 +418,7 @@ impl ImageService {
         log::info!("BN图片生成 - SVG生成耗时: {:?}", svg_gen_start.elapsed());
 
         let png_render_start = std::time::Instant::now();
-        let result = image_renderer::render_svg_to_png(svg_string);
+        let result = image_renderer::render_svg_to_png(svg_string, false); // 官方数据
         log::info!("BN图片生成 - PNG渲染耗时: {:?}", png_render_start.elapsed());
         result
     }
@@ -711,7 +712,7 @@ impl ImageService {
         log::info!("歌曲图片生成 - SVG生成耗时: {:?}", svg_gen_start.elapsed());
 
         let png_render_start = std::time::Instant::now();
-        let result = image_renderer::render_svg_to_png(svg_string);
+        let result = image_renderer::render_svg_to_png(svg_string, false); // 官方数据
         log::info!("歌曲图片生成 - PNG渲染耗时: {:?}", png_render_start.elapsed());
         result
     }
@@ -807,7 +808,7 @@ impl ImageService {
         };
 
         let svg_string = image_renderer::generate_leaderboard_svg_string(&render_data)?;
-        image_renderer::render_svg_to_png(svg_string)
+        image_renderer::render_svg_to_png(svg_string, false) // 排行榜不是用户生成的
     }
 }
 
@@ -940,5 +941,187 @@ impl ImageService {
             // 如果没有数据库连接，返回 None
             Ok(None)
         }
+    }
+
+    // --- 用户数据生成图片相关函数 ---
+
+    /// 根据用户提供的成绩数据生成Best N成绩图片
+    pub async fn generate_bn_image_from_user_data(
+        &self,
+        user_data: crate::controllers::image::UserGeneratedBnData,
+        song_service: web::Data<SongService>,
+    ) -> Result<Vec<u8>, AppError> {
+        let start_time = std::time::Instant::now();
+        log::info!("用户数据BN图片生成 - 开始处理请求: {:?}", start_time.elapsed());
+
+        // 转换用户数据为RksRecord
+        let mut rks_records = Vec::new();
+        let mut song_ids = Vec::new();
+
+        for (index, score) in user_data.scores.iter().enumerate() {
+            // 使用SongService查找歌曲信息
+            let song_info = song_service.search_song(&score.song_name)?;
+
+            // 获取难度常量
+            let difficulty_constants = song_service.get_song_difficulty(&song_info.id)?;
+
+            let difficulty_value = match score.difficulty.as_str() {
+                "EZ" => difficulty_constants.ez,
+                "HD" => difficulty_constants.hd,
+                "IN" => difficulty_constants.inl,
+                "AT" => difficulty_constants.at,
+                _ => return Err(AppError::BadRequest(format!(
+                    "第{}条成绩的难度无效: {}",
+                    index + 1, score.difficulty
+                )))
+            };
+
+            if difficulty_value.is_none() || difficulty_value.unwrap() <= 0.0 {
+                return Err(AppError::BadRequest(format!(
+                    "歌曲 '{}' 的难度 '{}' 常量未找到或无效",
+                    song_info.song, score.difficulty
+                )));
+            }
+
+            let dv = difficulty_value.unwrap();
+
+            // 计算RKS
+            let rks = rks_utils::calculate_chart_rks(score.acc, dv);
+
+            let record = RksRecord {
+                song_id: song_info.id.clone(),
+                song_name: song_info.song.clone(),
+                difficulty: score.difficulty.clone(),
+                score: Some(score.score as f64),
+                acc: score.acc,
+                rks,
+                difficulty_value: dv,
+                is_fc: false, // 用户数据不提供FC信息
+            };
+
+            rks_records.push(record);
+            song_ids.push(song_info.id);
+        }
+
+        // 按RKS排序
+        rks_records.sort_by(|a, b| b.rks.partial_cmp(&a.rks).unwrap_or(std::cmp::Ordering::Equal));
+
+        // 计算统计数据
+        let n = rks_records.len() as u32;
+        let (exact_rks, _) = rks_utils::calculate_player_rks_details(&rks_records);
+
+        // 计算AP数量和B27平均值
+        let ap_scores: Vec<RksRecord> = rks_records.iter().filter(|s| s.acc == 100.0).cloned().collect();
+        let ap_top_3_scores: Vec<RksRecord> = ap_scores.into_iter().take(3).collect();
+
+        let ap_top_3_avg = if ap_top_3_scores.len() >= 3 {
+            Some(ap_top_3_scores.iter().map(|s| s.rks).sum::<f64>() / 3.0)
+        } else {
+            None
+        };
+
+        let count_for_b27_display_avg = rks_records.len().min(27);
+        let best_27_avg = if count_for_b27_display_avg > 0 {
+            Some(
+                rks_records
+                    .iter()
+                    .take(count_for_b27_display_avg)
+                    .map(|s| s.rks)
+                    .sum::<f64>()
+                    / count_for_b27_display_avg as f64,
+            )
+        } else {
+            None
+        };
+
+        // 计算推分ACC
+        let mut push_acc_map: HashMap<String, f64> = HashMap::new();
+        let top_n_scores_for_push: Vec<RksRecord> = rks_records
+            .iter()
+            .take(n as usize)
+            .cloned()
+            .collect();
+
+        for score in top_n_scores_for_push
+            .iter()
+            .filter(|s| s.acc < 100.0 && s.difficulty_value > 0.0)
+        {
+            let key = format!("{}-{}", score.song_id, score.difficulty);
+            if let Some(push_acc) = rks_utils::calculate_target_chart_push_acc(
+                &key,
+                score.difficulty_value,
+                &top_n_scores_for_push,
+            ) {
+                push_acc_map.insert(key, push_acc);
+            }
+        }
+
+        // 构建PlayerStats
+        let stats = PlayerStats {
+            ap_top_3_avg,
+            best_27_avg,
+            real_rks: Some(exact_rks),
+            player_name: Some(user_data.player_name),
+            update_time: Utc::now(),
+            n,
+            ap_top_3_scores,
+            challenge_rank: None, // 用户数据不提供挑战模式信息
+            data_string: None, // 用户数据不提供数据信息
+            custom_footer_text: Some("*由玩家提供数据生成".to_string()), // 标记数据来源
+            is_user_generated: true, // 用户数据
+        };
+
+        log::info!("用户数据BN图片生成 - 数据处理耗时: {:?}", start_time.elapsed());
+
+        // 渲染图片
+        let render_start = std::time::Instant::now();
+        let theme = crate::controllers::image::Theme::Black; // 默认使用黑色主题
+
+        let permit = self.render_semaphore.clone().acquire_owned().await.map_err(|e| AppError::InternalError(format!("Failed to acquire semaphore permit: {e}")))?;
+
+        let png_data_result = web::block(move || {
+            let _permit = permit;
+            Self::_render_bn_image_from_user_data_sync(
+                rks_records,
+                stats,
+                push_acc_map,
+                theme,
+            )
+        })
+        .await
+        .map_err(|e| AppError::InternalError(format!("Blocking task join error: {e}")))?;
+
+        let png_data = png_data_result?;
+        log::info!("用户数据BN图片生成 - 渲染总耗时: {:?}", render_start.elapsed());
+
+        // 更新计数器
+        if let Err(e) = self.increment_counter("user-generated").await {
+            log::error!("更新用户生成图片计数器失败: {e}");
+        }
+
+        log::info!("用户数据BN图片生成 - 总耗时: {:?}", start_time.elapsed());
+        Ok(png_data)
+    }
+
+    /// 同步执行的用户数据BN图片渲染函数
+    fn _render_bn_image_from_user_data_sync(
+        rks_records: Vec<RksRecord>,
+        stats: PlayerStats,
+        push_acc_map: HashMap<String, f64>,
+        theme: crate::controllers::image::Theme,
+    ) -> Result<Vec<u8>, AppError> {
+        let svg_gen_start = std::time::Instant::now();
+        let svg_string = image_renderer::generate_svg_string(
+            &rks_records,
+            &stats,
+            Some(&push_acc_map),
+            &theme,
+        )?;
+        log::info!("用户数据BN图片生成 - SVG生成耗时: {:?}", svg_gen_start.elapsed());
+
+        let png_render_start = std::time::Instant::now();
+        let result = image_renderer::render_svg_to_png(svg_string, true); // 用户数据
+        log::info!("用户数据BN图片生成 - PNG渲染耗时: {:?}", png_render_start.elapsed());
+        result
     }
 }

@@ -26,6 +26,19 @@ struct SongSearchQuery {
     difficulty: Option<String>,
 }
 
+use crate::models::song::AmbiguousSongItem;
+use serde::Serialize;
+
+/// 歌曲搜索的响应体，能够根据结果数量呈现不同结构
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(untagged)]
+pub enum SongSearchResponse {
+    /// 当只有一个精确匹配结果时返回
+    Single(SongInfo),
+    /// 当有多个可能的匹配结果时返回
+    Multiple(Vec<AmbiguousSongItem>),
+}
+
 /// 搜索歌曲信息 (推荐)
 ///
 /// 根据提供的查询字符串（可以是歌曲名称、ID或别名）来搜索歌曲的详细信息。
@@ -34,7 +47,8 @@ struct SongSearchQuery {
     path = "/song/search",
     params(SongSearchQuery),
     responses(
-        (status = 200, description = "成功找到歌曲信息", body = ApiResponse<SongInfo>)
+        // 更新响应体文档
+        (status = 200, description = "成功找到歌曲信息", body = ApiResponse<SongSearchResponse>)
     )
 )]
 #[get("/song/search")]
@@ -46,15 +60,32 @@ pub async fn search_song(
         .get("q")
         .ok_or_else(|| crate::utils::error::AppError::BadRequest("缺少查询参数q".to_string()))?;
 
-    debug!("接收到歌曲搜索请求: q={q}");
+    // 1. 调用你新创建的 search_songs 服务函数
+    let results = song_service.search_songs(q)?;
 
-    let song_info = song_service.search_song(q)?;
+    // 2. 根据结果数量决定响应结构
+    let response_data = if results.len() == 1 {
+        // 只有一个结果，返回完整的 SongInfo
+        SongSearchResponse::Single(results.into_iter().next().unwrap())
+    } else {
+        // 多个结果，转换为 AmbiguousSongItem 列表
+        let items = results
+            .into_iter()
+            .map(|info| AmbiguousSongItem {
+                song_id: info.id,
+                song_name: info.song,
+                composer: info.composer,
+            })
+            .collect();
+        SongSearchResponse::Multiple(items)
+    };
 
+    // 3. 返回标准 API 响应
     Ok(HttpResponse::Ok().json(ApiResponse {
         code: 200,
         status: "OK".to_string(),
         message: None,
-        data: Some(song_info),
+        data: Some(response_data),
     }))
 }
 

@@ -38,6 +38,31 @@ pub struct LeaderboardQuery {
     pub limit: Option<usize>,
 }
 
+#[derive(Deserialize, Debug, ToSchema)]
+pub struct UserScoreRecord {
+    /// 歌曲名称、ID或别名
+    pub song_name: String,
+    /// 成绩分数
+    pub score: u32,
+    /// 准确率
+    pub acc: f64,
+    /// 难度级别 (EZ, HD, IN, AT)
+    #[serde(default = "default_difficulty")]
+    pub difficulty: String,
+}
+
+#[derive(Deserialize, Debug, ToSchema)]
+pub struct UserGeneratedBnData {
+    /// 玩家名称
+    pub player_name: String,
+    /// 成绩列表
+    pub scores: Vec<UserScoreRecord>,
+}
+
+fn default_difficulty() -> String {
+    "IN".to_string()
+}
+
 /// 生成Best N成绩图片
 ///
 /// 根据用户的RKS计算结果，生成一张包含其最好N项成绩的图片。
@@ -230,4 +255,68 @@ pub async fn get_image_stats_by_type(
             "last_updated": "never"
         }))),
     }
+}
+
+/// 根据用户提供的成绩数据生成Best N成绩图片
+///
+/// 用户可以提供自己的成绩数据，系统会将其转换为标准的成绩记录并生成图片。
+/// 图片上会标注数据来源于用户提供，以示区分。
+#[utoipa::path(
+    post,
+    path = "/bn/user-generated",
+    request_body = UserGeneratedBnData,
+    responses(
+        (status = 200, description = "成功生成图片", content_type = "image/png", body = Vec<u8>),
+        (status = 400, description = "请求参数错误"),
+        (status = 500, description = "服务器内部错误")
+    )
+)]
+#[post("/bn/user-generated")]
+pub async fn generate_bn_image_from_user_data(
+    req: web::Json<UserGeneratedBnData>,
+    song_service: web::Data<SongService>,
+    image_service: web::Data<ImageService>,
+) -> Result<HttpResponse, AppError> {
+    let user_data = req.into_inner();
+
+    // 验证成绩数量
+    if user_data.scores.is_empty() {
+        return Err(AppError::BadRequest("成绩列表不能为空".to_string()));
+    }
+
+    if user_data.scores.len() > 100 {
+        return Err(AppError::BadRequest("成绩数量不能超过100".to_string()));
+    }
+
+    // 验证每个成绩记录
+    for (index, score) in user_data.scores.iter().enumerate() {
+        if score.score == 0 || score.score > 1_000_000 {
+            return Err(AppError::BadRequest(format!(
+                "第{}条成绩的分数无效: {}",
+                index + 1, score.score
+            )));
+        }
+
+        if score.acc < 0.0 || score.acc > 100.0 {
+            return Err(AppError::BadRequest(format!(
+                "第{}条成绩的准确率无效: {}",
+                index + 1, score.acc
+            )));
+        }
+
+        if !["EZ", "HD", "IN", "AT"].contains(&score.difficulty.as_str()) {
+            return Err(AppError::BadRequest(format!(
+                "第{}条成绩的难度无效: {} (必须是 EZ, HD, IN, AT 之一)",
+                index + 1, score.difficulty
+            )));
+        }
+    }
+
+    let image_bytes = image_service
+        .generate_bn_image_from_user_data(user_data, song_service)
+        .await?;
+
+    Ok(HttpResponse::Ok()
+        .content_type("image/png")
+        .body(image_bytes))
 }

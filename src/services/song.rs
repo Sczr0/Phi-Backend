@@ -1,6 +1,7 @@
 use crate::models::song::{SongDifficulty, SongInfo};
 use crate::utils::data_loader::{DIFFICULTY_MAP, SONG_INFO, SONG_NICKNAMES};
 use crate::utils::error::{AppError, AppResult};
+use std::collections::HashSet;
 
 // 歌曲服务，提供歌曲信息查询
 #[derive(Clone)]
@@ -143,6 +144,72 @@ impl SongService {
         // 7. 如果未找到，则返回错误
         log::info!("找不到匹配查询 '{query}' 的歌曲");
         Err(AppError::SongNotFound(query.to_string()))
+    }
+
+    // 新的统一搜索函数，返回所有可能的匹配项
+    pub fn search_songs(&self, query: &str) -> AppResult<Vec<SongInfo>> {
+        let mut results: Vec<SongInfo> = Vec::new();
+        let mut found_ids: HashSet<String> = HashSet::new();
+        let query_trimmed = query.trim();
+        let query_lower = query_trimmed.to_lowercase();
+
+        if query_trimmed.is_empty() {
+            return Err(AppError::SongNotFound("输入为空".to_string()));
+        }
+
+        // 1. 精确匹配
+        // 按 ID 匹配
+        if let Some(song_info) = self.id_to_song.get(query_trimmed) {
+            if found_ids.insert(song_info.id.clone()) {
+                results.push(song_info.clone());
+            }
+        }
+
+        // 按精确曲名匹配
+        if let Some(song_info) = self.name_to_song.get(&query_lower) {
+            if found_ids.insert(song_info.id.clone()) {
+                results.push(song_info.clone());
+            }
+        }
+
+        // 按精确别名匹配
+        if let Some(song_id) = self.nickname_to_id.get(&query_lower) {
+            if let Some(song_info) = self.id_to_song.get(song_id) {
+                if found_ids.insert(song_info.id.clone()) {
+                    results.push(song_info.clone());
+                }
+            }
+        }
+
+        // 2. 模糊匹配
+        // 按模糊曲名匹配
+        self.name_to_song
+            .iter()
+            .filter(|(name, _)| name.contains(&query_lower))
+            .for_each(|(_, song_info)| {
+                if found_ids.insert(song_info.id.clone()) {
+                    results.push(song_info.clone());
+                }
+            });
+
+        // 按模糊别名匹配
+        self.nickname_to_id
+            .iter()
+            .filter(|(nickname, _)| nickname.contains(&query_lower))
+            .for_each(|(_, song_id)| {
+                if let Some(song_info) = self.id_to_song.get(song_id) {
+                    if found_ids.insert(song_info.id.clone()) {
+                        results.push(song_info.clone());
+                    }
+                }
+            });
+
+        // 3. 返回结果
+        if results.is_empty() {
+            Err(AppError::SongNotFound(query.to_string()))
+        } else {
+            Ok(results)
+        }
     }
 
     // 根据统一查询找ID

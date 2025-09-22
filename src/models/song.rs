@@ -75,3 +75,15 @@ pub struct SongQuery {
 /// 歌曲昵称映射类型
 /// 用于存储歌曲名称到其昵称列表的映射
 pub type NicknameMap = HashMap<String, Vec<String>>;
+
+
+/// 用于在多结果搜索中返回的单个歌曲项，包含关键信息
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AmbiguousSongItem {
+    /// 歌曲ID
+    pub song_id: String,
+    /// 歌曲名称
+    pub song_name: String,
+    /// 作曲家
+    pub composer: String,
+}

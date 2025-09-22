@@ -39,7 +39,8 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     // 图片路由
     cfg.service(
         web::scope("/image")
-            .service(controllers::image::generate_bn_image)
+            .service(controllers::image::generate_bn_image_from_user_data) // POST /image/bn/user-generated
+            .service(controllers::image::generate_bn_image) // POST /image/bn/{n}
             .service(controllers::image::generate_song_image)
             .service(controllers::image::get_rks_leaderboard)
             .service(controllers::image::get_cache_stats)

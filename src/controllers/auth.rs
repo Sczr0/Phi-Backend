@@ -97,7 +97,7 @@ pub async fn generate_qr_code() -> impl Responder {
 
             // 3. 使用 image_renderer 将SVG转换为PNG字节（使用阻塞任务）
             let png_bytes = match tokio::task::spawn_blocking(move || {
-                image_renderer::render_svg_to_png(svg_str)
+                image_renderer::render_svg_to_png(svg_str, false) // 二维码不是用户生成的
             })
             .await
             {
