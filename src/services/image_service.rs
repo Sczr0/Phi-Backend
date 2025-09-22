@@ -436,7 +436,24 @@ impl ImageService {
         let start_time = std::time::Instant::now();
         log::info!("歌曲图片生成 - 开始处理请求: {:?}", start_time.elapsed());
 
-        let song_info = song_service.search_song(&song_query)?;
+        // 使用新的 search_songs 函数来处理可能的歧义
+        let search_results = song_service.search_songs(&song_query)?;
+
+        // 检查搜索结果的数量
+        let song_info = if search_results.len() == 1 {
+            search_results.into_iter().next().unwrap()
+        } else {
+            // 如果找到多个或零个结果，则返回错误
+            let found_songs: Vec<String> = search_results
+                .into_iter()
+                .map(|s| format!("{} ({})", s.song, s.id))
+                .collect();
+            return Err(AppError::BadRequest(format!(
+                "歌曲 '{}' 存在歧义或未找到，请使用更精确的名称或歌曲ID。可能匹配: {}",
+                song_query,
+                found_songs.join(", ")
+            )));
+        };
         let song_id = song_info.id.clone();
 
         let save_checksum = if identifier.data_source.as_deref() == Some("external") {
