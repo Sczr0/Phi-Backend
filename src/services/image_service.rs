@@ -959,8 +959,24 @@ impl ImageService {
         let mut song_ids = Vec::new();
 
         for (index, score) in user_data.scores.iter().enumerate() {
-            // 使用SongService查找歌曲信息
-            let song_info = song_service.search_song(&score.song_name)?;
+            // 使用新的 search_songs 函数来处理可能的歧义
+            let search_results = song_service.search_songs(&score.song_name)?;
+
+            // 检查搜索结果的数量
+            let song_info = if search_results.len() == 1 {
+                search_results.into_iter().next().unwrap()
+            } else {
+                // 如果找到多个或零个结果，则返回错误
+                let found_songs: Vec<String> = search_results
+                    .into_iter()
+                    .map(|s| format!("{} ({})", s.song, s.id))
+                    .collect();
+                return Err(AppError::BadRequest(format!(
+                    "歌曲 '{}' 存在歧义或未找到，请使用更精确的名称或歌曲ID。可能匹配: {}",
+                    score.song_name,
+                    found_songs.join(", ")
+                )));
+            };
 
             // 获取难度常量
             let difficulty_constants = song_service.get_song_difficulty(&song_info.id)?;
