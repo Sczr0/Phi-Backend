@@ -6,10 +6,18 @@ use actix_web::web;
 /// 从请求中解析出SessionToken
 /// 优先使用请求体中的token字段
 /// 如果token字段不存在，尝试使用platform和platform_id字段查询数据库获取绑定的token
+/// 外部数据源会返回占位符token，不进行数据库查询
 pub async fn resolve_token(
     req: &web::Json<IdentifierRequest>,
     user_service: &web::Data<UserService>,
 ) -> AppResult<String> {
+    // 检查是否为外部数据源
+    if req.data_source.as_deref() == Some("external") {
+        log::debug!("检测到外部数据源请求，返回占位符token");
+        // 外部数据源不需要真实的token，返回占位符
+        return Ok("external_placeholder_token".to_string());
+    }
+
     if let Some(token) = &req.token {
         if !token.trim().is_empty() {
             log::debug!("从请求体 token 字段解析到 Token");

@@ -31,11 +31,15 @@ pub async fn get_rks(
     user_service: web::Data<UserService>,
     player_archive_service: web::Data<PlayerArchiveService>,
 ) -> AppResult<HttpResponse> {
-    let _token = resolve_token(&req, &user_service).await?;
-    check_session_token(&_token)?;
-
-    let (rks_result, save, player_id, player_name) =
-        phigros_service.get_rks_with_source(&req).await?;
+    let (rks_result, save, player_id, player_name) = if req.data_source.as_deref() == Some("external") {
+        // 外部数据源：直接调用服务方法，不需要token验证
+        phigros_service.get_rks_with_source(&req).await?
+    } else {
+        // 内部数据源：需要token验证
+        let _token = resolve_token(&req, &user_service).await?;
+        check_session_token(&_token)?;
+        phigros_service.get_rks_with_source(&req).await?
+    };
 
     let mut fc_map = HashMap::new();
     if let Some(game_record_map) = &save.game_record {
@@ -115,9 +119,14 @@ pub async fn get_bn(
         }));
     }
 
-    let token = resolve_token(&req, &user_service).await?;
-
-    let (rks_result, _, _, _) = phigros_service.get_rks_with_source(&req).await?;
+    let (rks_result, _, _, _) = if req.data_source.as_deref() == Some("external") {
+        // 外部数据源：直接调用服务方法，不需要token验证
+        phigros_service.get_rks_with_source(&req).await?
+    } else {
+        // 内部数据源：需要token验证
+        let _token = resolve_token(&req, &user_service).await?;
+        phigros_service.get_rks_with_source(&req).await?
+    };
 
     let bn = rks_result
         .records

@@ -102,19 +102,39 @@
 
 **通用请求体:**
 
--   **`IdentifierRequest`** (用于需要用户身份的接口)
-    -   请求体中必须包含 `token` 或 (`platform` 和 `platform_id`) 中的至少一组。
-    -   如果都提供，优先使用 `token`。
-    -   `platform` 字段大小写不敏感。
+-   **`ExternalIdentifierRequest`** (用于需要用户身份的接口)
+    -   所有需要用户身份的接口都使用此请求体。
+    -   通过 `source` 字段指定数据源 (`internal` 或 `external`)。
+    -   **内部数据源 (`internal`)**:
+        -   需要提供 `token` 或 (`platform` 和 `platform_id`)。
+    -   **外部数据源 (`external`)**:
+        -   支持三种鉴权方式：`token` (Phigros Session Token), `api_user_id` + `api_token`, 或 `platform` + `platform_id`。
+
     ```json
-    // 方式一：使用 SessionToken
+    // 示例 1: 使用内部数据源 (通过Token)
     {
+        "source": "internal",
         "token": "用户的Phigros SessionToken"
     }
-    // 方式二：使用平台和平台ID (如果已绑定)
+
+    // 示例 2: 使用内部数据源 (通过平台绑定)
     {
-        "platform": "qq", // 平台名称 (大小写不敏感)
+        "source": "internal",
+        "platform": "qq",
         "platform_id": "用户的QQ号"
+    }
+
+    // 示例 3: 使用外部数据源 (通过Token)
+    {
+        "source": "external",
+        "token": "用户的Phigros SessionToken"
+    }
+
+    // 示例 4: 使用外部数据源 (通过API Key)
+    {
+        "source": "external",
+        "api_user_id": "外部API的用户ID",
+        "api_token": "外部API的Token"
     }
     ```
 
@@ -237,25 +257,25 @@
 
 -   **`POST /get/cloud/saves`**
     -   描述: 获取并解析用户的Phigros云存档（不含难度定数和RKS）。
-    -   请求体: `IdentifierRequest`
+    -   请求体: `ExternalIdentifierRequest`
     -   成功响应 (`200 OK`): 返回基础 `GameSave` 结构。
     -   失败响应: `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
 -   **`POST /get/cloud/saves/with_difficulty`**
     -   描述: 获取并解析用户的Phigros云存档，包含难度定数和计算出的RKS值。
-    -   请求体: `IdentifierRequest`
+    -   请求体: `ExternalIdentifierRequest`
     -   成功响应 (`200 OK`): 返回包含 `difficulty` 和 `rks` 的 `GameSave` 结构。
     -   失败响应: `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
 -   **`POST /get/cloud/saveInfo`**
     -   描述: 获取原始的云存档元数据 (`saveInfo`)。这个JSON对象包含了存档文件的URL、校验和、更新时间等，但不包含游戏存档本身的内容。
-    -   请求体: `IdentifierRequest`
+    -   请求体: `ExternalIdentifierRequest`
     -   成功响应 (`200 OK`): 返回原始的 `saveInfo` JSON对象。
     -   失败响应: `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
 -   **`POST /rks`**
     -   描述: 计算并返回用户所有歌曲的RKS分数，按分数由高到低排序。
-    -   请求体: `IdentifierRequest`
+    -   请求体: `ExternalIdentifierRequest`
     -   成功响应 (`200 OK`):
       ```json
       {
@@ -275,14 +295,14 @@
 
 -   **`POST /b30`**
     -   描述: 计算并返回用户的B30成绩。
-    -   请求体: `IdentifierRequest`
+    -   请求体: `ExternalIdentifierRequest`
     -   成功响应 (`200 OK`): 返回 `B30Result` 结构。
     -   失败响应: `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 
 -   **`POST /bn/{n}`**
     -   描述: 计算并返回用户的 Best N 成绩。
     -   路径参数: `n` (整数, 必须大于0)
-    -   请求体: `IdentifierRequest`
+    -   请求体: `ExternalIdentifierRequest`
     -   成功响应 (`200 OK`): 返回 `BnResult` 结构。
     -   失败响应: `400 Bad Request`, `401 Unauthorized`, `404 Not Found`, `500 Internal Server Error`。
 

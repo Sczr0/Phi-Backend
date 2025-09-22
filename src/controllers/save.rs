@@ -30,13 +30,25 @@ pub async fn get_cloud_saves(
     phigros_service: web::Data<PhigrosService>,
     user_service: web::Data<UserService>,
 ) -> AppResult<HttpResponse> {
-    let token = resolve_token(&req, &user_service).await?;
-    check_session_token(&token)?;
+    let (save_result, profile_result) = if req.data_source.as_deref() == Some("external") {
+        // 外部数据源：直接获取存档，不需要profile
+        let save_result = phigros_service.get_save_with_source(&req).await;
+        (save_result, Ok(crate::models::user::UserProfile {
+            object_id: "external".to_string(),
+            nickname: req.platform.as_ref()
+                .map(|p| format!("{}:{}", p, req.platform_id.as_ref().unwrap_or(&"unknown".to_string())))
+                .unwrap_or_else(|| "External User".to_string())
+        }))
+    } else {
+        // 内部数据源：并行获取数据
+        let token = resolve_token(&req, &user_service).await?;
+        check_session_token(&token)?;
 
-    let (save_result, profile_result) = tokio::join!(
-        phigros_service.get_save_with_source(&req),
-        phigros_service.get_profile(&token)
-    );
+        tokio::join!(
+            phigros_service.get_save_with_source(&req),
+            phigros_service.get_profile(&token)
+        )
+    };
 
     let save_data = save_result?;
 
@@ -110,7 +122,13 @@ pub async fn get_cloud_saves_with_difficulty(
 ) -> AppResult<HttpResponse> {
     debug!("接收到获取带难度定数的云存档请求");
 
-    let _token = resolve_token(&req, &user_service).await?;
+    let _token = if req.data_source.as_deref() == Some("external") {
+        // 外部数据源：使用占位符token
+        "external_placeholder_token".to_string()
+    } else {
+        // 内部数据源：解析真实token
+        resolve_token(&req, &user_service).await?
+    };
 
     let save = phigros_service.get_save_with_difficulty_and_source(&req).await?;
 

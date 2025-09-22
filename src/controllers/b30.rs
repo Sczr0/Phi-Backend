@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use utoipa;
 
 use crate::models::b30::B30Result;
+use crate::models::cloud_save::FullSaveData;
 use crate::models::user::{ApiResponse, IdentifierRequest};
 use crate::services::phigros::PhigrosService;
 use crate::services::player_archive_service::PlayerArchiveService;
@@ -34,30 +35,68 @@ pub async fn get_b30(
     // 检查会话令牌
     check_session_token(&token)?;
 
-    // (优化后) 并行获取 RKS列表+存档 和 Profile
-    let (rks_save_res, profile_res) = tokio::join!(
-        phigros_service.get_rks_with_source(&req),
-        phigros_service.get_profile(&token)
-    );
+    // 根据数据源获取完整存档数据
+    let full_data = if req.data_source.as_deref() == Some("external") {
+        // 外部数据源：直接获取完整数据
+        phigros_service.get_full_save_data_with_source(&req).await?
+    } else {
+        // 内部数据源：并行获取数据
+        let (full_data_res, profile_res) = tokio::join!(
+            phigros_service.get_full_save_data_with_source(&req),
+            phigros_service.get_profile(&token)
+        );
 
-    // 解包结果
-    let (rks_result, save, _, _) = rks_save_res?;
+        let full_data = full_data_res?;
 
-    // 获取玩家ID和昵称
-    let player_id = save
-        .user
-        .as_ref()
-        .and_then(|u| u.get("objectId"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown")
-        .to_string();
-    let player_name = match profile_res {
-        Ok(profile) => profile.nickname,
-        Err(e) => {
-            log::warn!("获取用户 Profile 失败 (get_b30): {e}, 将使用 Player ID 作为名称");
-            player_id.clone()
+        // 获取玩家ID和昵称（内部数据源）
+        let player_id = full_data.save
+            .user
+            .as_ref()
+            .and_then(|u| u.get("objectId"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let player_name = match profile_res {
+            Ok(profile) => profile.nickname,
+            Err(e) => {
+                log::warn!("获取用户 Profile 失败 (get_b30): {e}, 将使用 Player ID 作为名称");
+                player_id.clone()
+            }
+        };
+
+        // 构造包含玩家信息的完整数据
+        let mut modified_summary = full_data.cloud_summary.clone();
+        if let Some(results) = modified_summary.get_mut("results") {
+            if let Some(results_array) = results.as_array_mut() {
+                if let Some(result_obj) = results_array.get_mut(0) {
+                    if let Some(obj) = result_obj.as_object_mut() {
+                        obj.insert("PlayerId".to_string(), serde_json::Value::String(player_id.clone()));
+                        obj.insert("nickname".to_string(), serde_json::Value::String(player_name.clone()));
+                    }
+                }
+            }
+        }
+
+        FullSaveData {
+            rks_result: full_data.rks_result,
+            save: full_data.save,
+            cloud_summary: modified_summary,
         }
     };
+
+    let rks_result = full_data.rks_result;
+    let save = full_data.save;
+
+    // 从完整数据中提取玩家信息
+    let summary = &full_data.cloud_summary["results"][0];
+    let player_id = summary["PlayerId"]
+        .as_str()
+        .unwrap_or("external:unknown")
+        .to_string();
+    let player_name = summary["nickname"]
+        .as_str()
+        .unwrap_or(&player_id)
+        .to_string();
 
     // 从存档构建 FC Map
     let mut fc_map = HashMap::new();
