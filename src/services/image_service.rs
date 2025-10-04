@@ -48,6 +48,226 @@ pub struct ImageService {
 }
 
 impl ImageService {
+    pub async fn generate_bn_svg(
+        &self,
+        n: u32,
+        identifier: web::Json<IdentifierRequest>,
+        theme: &crate::controllers::image::Theme,
+        phigros_service: web::Data<PhigrosService>,
+        user_service: web::Data<UserService>,
+        player_archive_service: web::Data<PlayerArchiveService>,
+    ) -> Result<String, AppError> {
+        let start_time = std::time::Instant::now();
+        log::info!("BN SVG 生成 - 开始处理请求: {:?}", start_time.elapsed());
+
+        let save_checksum = if identifier.data_source.as_deref() == Some("external") {
+            if let Some(api_user_id) = &identifier.api_user_id {
+                format!("external_api_{}", api_user_id)
+            } else {
+                format!(
+                    "external_{}_{}",
+                    identifier.platform.as_deref().unwrap_or(""),
+                    identifier.platform_id.as_deref().unwrap_or("")
+                )
+            }
+        } else {
+            let token = resolve_token(&identifier, &user_service).await?;
+            phigros_service
+                .get_save_checksum(&token)
+                .await
+                .unwrap_or_else(|_| "unknown".to_string())
+        };
+
+        let (full_data_res, profile_res) = if identifier.data_source.as_deref() == Some("external") {
+            tokio::join!(
+                phigros_service.get_full_save_data_with_source(&identifier),
+                async {
+                    Ok(crate::models::user::UserProfile {
+                        object_id: "external".to_string(),
+                        nickname: identifier.platform.as_ref()
+                            .map(|p| format!("{}:{}", p, identifier.platform_id.as_ref().unwrap_or(&"unknown".to_string())))
+                            .unwrap_or_else(|| "External User".to_string()),
+                    })
+                }
+            )
+        } else {
+            let token = resolve_token(&identifier, &user_service).await?;
+            tokio::join!(
+                phigros_service.get_full_save_data(&token),
+                phigros_service.get_profile(&token)
+            )
+        };
+
+        let full_data = full_data_res?;
+        if full_data.rks_result.records.is_empty() {
+            return Err(AppError::Other(format!(
+                "用户无成绩记录，无法生成 B{n} SVG"
+            )));
+        }
+
+        let player_nickname = profile_res.ok().map(|p| p.nickname);
+
+        let (player_id, player_name) = if identifier.data_source.as_deref() == Some("external") {
+            let player_id = full_data.cloud_summary["results"][0]["PlayerId"]
+                .as_str()
+                .unwrap_or("external:unknown")
+                .to_string();
+            let player_name = full_data.cloud_summary["results"][0]["PlayerId"]
+                .as_str()
+                .unwrap_or("external:unknown")
+                .to_string();
+            (player_id, player_name)
+        } else {
+            let player_id = full_data
+                .save
+                .user
+                .as_ref()
+                .and_then(|u| u.get("objectId"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let player_name = player_nickname.clone().unwrap_or(player_id.clone());
+            (player_id, player_name)
+        };
+
+        // 后台异步更新玩家存档（不阻塞SVG生成）
+        let player_name_for_archive = player_name.clone();
+        let mut fc_map = std::collections::HashMap::new();
+        if let Some(game_record_map) = &full_data.save.game_record {
+            for (song_id, difficulties) in game_record_map {
+                for (diff_name, record) in difficulties {
+                    if record.fc == Some(true) {
+                        fc_map.insert(format!("{}-{}", song_id, diff_name), true);
+                    }
+                }
+            }
+        }
+        let archive_service_clone = player_archive_service.clone();
+        let player_id_clone = player_id.clone();
+        let player_name_clone = player_name_for_archive.clone();
+        let scores_clone = full_data.rks_result.records.clone();
+        let is_external = identifier.data_source.as_deref() == Some("external");
+        let bg_sem = self.bg_task_semaphore.clone();
+        tokio::spawn(async move {
+            let _permit = bg_sem.acquire_owned().await.ok();
+            if let Err(e) = archive_service_clone
+                .update_player_scores_from_rks_records(
+                    &player_id_clone,
+                    &player_name_clone,
+                    &scores_clone,
+                    &fc_map,
+                    is_external,
+                )
+                .await
+            {
+                log::error!(
+                    "后台更新玩家 {player_name_clone} ({player_id_clone}) 存档失败: {e}"
+                );
+            }
+        });
+
+        // 排序并截取Top N
+        let mut sorted_scores = full_data.rks_result.records.clone();
+        sorted_scores.sort_by(|a, b| b.rks.partial_cmp(&a.rks).unwrap_or(std::cmp::Ordering::Equal));
+        let (exact_rks, _) = crate::utils::rks_utils::calculate_player_rks_details(&sorted_scores);
+        let top_n_scores: Vec<crate::models::rks::RksRecord> =
+            sorted_scores.iter().take(n as usize).cloned().collect();
+
+        // 预计算推分ACC
+        let mut push_acc_map: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+        for score in top_n_scores
+            .iter()
+            .filter(|s| s.acc < 100.0 && s.difficulty_value > 0.0)
+        {
+            let key = format!("{}-{}", score.song_id, score.difficulty);
+            if let Some(push_acc) = crate::utils::rks_utils::calculate_target_chart_push_acc(
+                &key,
+                score.difficulty_value,
+                &top_n_scores,
+            ) {
+                push_acc_map.insert(key, push_acc);
+            }
+        }
+
+        let app_config = crate::utils::config::get_config()?;
+        let ap_scores_ranked: Vec<_> = sorted_scores.iter().filter(|s| s.acc == 100.0).collect();
+        let ap_top_3_scores: Vec<crate::models::rks::RksRecord> =
+            ap_scores_ranked.iter().take(3).map(|&s| s.clone()).collect();
+        let ap_top_3_avg = if ap_top_3_scores.len() >= 3 {
+            Some(ap_top_3_scores.iter().map(|s| s.rks).sum::<f64>() / 3.0)
+        } else {
+            None
+        };
+        let count_for_b27_display_avg = sorted_scores.len().min(27);
+        let best_27_avg = if count_for_b27_display_avg > 0 {
+            Some(
+                sorted_scores
+                    .iter()
+                    .take(count_for_b27_display_avg)
+                    .map(|s| s.rks)
+                    .sum::<f64>()
+                    / count_for_b27_display_avg as f64,
+            )
+        } else {
+            None
+        };
+
+        let stats = PlayerStats {
+            ap_top_3_avg,
+            best_27_avg,
+            real_rks: Some(exact_rks),
+            player_name: Some(player_name),
+            update_time: {
+                let date_str = full_data.cloud_summary["results"][0]["updatedAt"]
+                    .as_str()
+                    .unwrap_or_default();
+                chrono::DateTime::parse_from_rfc3339(date_str)
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
+                    .unwrap_or_else(|_| chrono::Utc::now())
+            },
+            n,
+            ap_top_3_scores,
+            challenge_rank: if let Some(game_progress) = &full_data.save.game_progress {
+                let rank = game_progress
+                    .get("challengeModeRank")
+                    .and_then(|v| v.as_i64())
+                    .and_then(|rank_num| {
+                        if rank_num <= 0 { return None; }
+                        let rank_str = rank_num.to_string();
+                        if rank_str.is_empty() { return None; }
+                        let (color_char, level_str) = rank_str.split_at(1);
+                        let color = match color_char {
+                            "1" => "Green", "2" => "Blue", "3" => "Red",
+                            "4" => "Gold", "5" => "Rainbow", _ => return None,
+                        };
+                        Some((color.to_string(), level_str.to_string()))
+                    });
+                rank
+            } else { None },
+            data_string: if let Some(game_progress) = &full_data.save.game_progress {
+                game_progress.get("money").and_then(|v| v.as_array()).and_then(|arr| {
+                    let units = ["KB", "MB", "GB", "TB"];
+                    let mut parts: Vec<String> = arr.iter().zip(units.iter()).filter_map(|(val, &unit)| {
+                        val.as_u64().and_then(|u_val| if u_val > 0 { Some(format!("{u_val} {unit}")) } else { None })
+                    }).collect();
+                    parts.reverse();
+                    if parts.is_empty() { None } else { Some(format!("Data: {}", parts.join(", "))) }
+                })
+            } else { None },
+            custom_footer_text: Some(app_config.custom_footer_text),
+            is_user_generated: false,
+        };
+
+        let svg_string = image_renderer::generate_svg_string(
+            &top_n_scores,
+            &stats,
+            Some(&push_acc_map),
+            theme,
+            true,
+        )?;
+
+        Ok(svg_string)
+    }
     pub fn new(max_concurrent_renders: usize) -> Self {
         Self {
             // 按字节加权的缓存，限制总内存占用
@@ -424,6 +644,7 @@ impl ImageService {
             &stats,
             Some(&push_acc_map),
             &theme,
+            false,
         )?;
         log::info!("BN图片生成 - SVG生成耗时: {:?}", svg_gen_start.elapsed());
 
@@ -737,7 +958,7 @@ impl ImageService {
         log::info!("歌曲图片生成 - RenderData创建耗时: {:?}", render_data_creation_start.elapsed());
 
         let svg_gen_start = std::time::Instant::now();
-        let svg_string = image_renderer::generate_song_svg_string(&render_data)?;
+        let svg_string = image_renderer::generate_song_svg_string(&render_data, false)?;
         log::info!("歌曲图片生成 - SVG生成耗时: {:?}", svg_gen_start.elapsed());
 
         let png_render_start = std::time::Instant::now();
@@ -1161,6 +1382,7 @@ impl ImageService {
             &stats,
             Some(&push_acc_map),
             &theme,
+            false,
         )?;
         log::info!("用户数据BN图片生成 - SVG生成耗时: {:?}", svg_gen_start.elapsed());
 

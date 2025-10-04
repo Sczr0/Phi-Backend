@@ -285,18 +285,17 @@ fn get_background_image(path: &PathBuf) -> Option<String> {
 }
 
 /// 返回适合放入 <image href> 的引用：小图返回 data URI，大图返回文件路径
-fn get_background_image_href(path: &PathBuf) -> Option<String> {
-    // 优先根据文件大小决定策略
+fn get_image_href(path: &PathBuf, embed_images: bool) -> Option<String> {
+    if embed_images {
+        return get_background_image(path);
+    }
     if let Ok(meta) = fs::metadata(path) {
         let len = meta.len();
-        // 小于等于256KB：使用 data URI（避免额外文件访问）
         if len <= 256 * 1024 {
             return get_background_image(path);
         }
-        // 否则直接返回文件路径，交给 resvg 基于 resources_dir 读取
         return Some(path.to_string_lossy().into_owned());
     }
-    // 回退尝试 data URI
     get_background_image(path)
 }
 
@@ -314,6 +313,7 @@ struct CardRenderInfo<'a> {
     all_sorted_records: &'a [RksRecord],
     theme: &'a crate::controllers::image::Theme,
     is_user_generated: bool, // 新增
+    embed_images: bool,
 }
 
 fn generate_card_svg(info: CardRenderInfo) -> Result<(), AppError> {
@@ -333,6 +333,7 @@ fn generate_card_svg(info: CardRenderInfo) -> Result<(), AppError> {
         all_sorted_records,
         theme: _theme,
         is_user_generated,
+        embed_images,
     } = info;
 
     // --- Card Dimensions & Layout ---
@@ -418,9 +419,14 @@ fn generate_card_svg(info: CardRenderInfo) -> Result<(), AppError> {
         });
 
     if let Some(href) = cover_href {
-        let escaped_href = escape_xml(&href);
+        let final_href = if embed_images {
+            let pb = PathBuf::from(&href);
+            get_background_image(&pb).unwrap_or(href)
+        } else {
+            href
+        };
+        let escaped_href = escape_xml(&final_href);
         writeln!(svg, r#"<image href="{escaped_href}" x="{cover_x}" y="{cover_y}" width="{cover_size_w:.1}" height="{cover_size_h:.1}" clip-path="url(#{clip_path_id})" />"#).map_err(fmt_err)?;
-        // 不需要额外处理，上面的 or_else 已经涵盖了所有情况
     }
 
     // Text content positioning
@@ -649,6 +655,7 @@ pub fn generate_svg_string(
     stats: &PlayerStats,
     push_acc_map: Option<&HashMap<String, f64>>, // 新增：预先计算的推分ACC映射，键为"曲目ID-难度"
     theme: &crate::controllers::image::Theme,    // 新增：主题参数
+    embed_images: bool,
 ) -> Result<String, AppError> {
     let _start_time = std::time::Instant::now();
     // ... (width, height calculations etc. - keep these as they were) ...
@@ -757,7 +764,7 @@ pub fn generate_svg_string(
             // --- 结束新增 ---
 
             // 使用缓存函数获取背景图片
-            if let Some(image_href) = get_background_image_href(random_path) {
+            if let Some(image_href) = get_image_href(random_path, embed_images) {
                 background_image_href = Some(image_href);
                 log::info!("使用随机背景图: {}", random_path.display());
             } else {
@@ -1040,6 +1047,7 @@ pub fn generate_svg_string(
                 all_sorted_records: scores,
                 theme,
                 is_user_generated: stats.is_user_generated,
+                embed_images,
             })?
         }
         writeln!(svg, r#"</g>"#).map_err(fmt_err)?;
@@ -1075,6 +1083,7 @@ pub fn generate_svg_string(
             all_sorted_records: scores,
             theme,
             is_user_generated: stats.is_user_generated,
+            embed_images,
         })?
     }
 
@@ -1250,7 +1259,7 @@ fn get_inverse_color_from_path_cached(path: &Path) -> Option<String> {
 }
 
 // --- 新增：生成单曲成绩 SVG ---
-pub fn generate_song_svg_string(data: &SongRenderData) -> Result<String, AppError> {
+pub fn generate_song_svg_string(data: &SongRenderData, embed_images: bool) -> Result<String, AppError> {
     let fmt_err = |e| AppError::InternalError(format!("SVG formatting error: {e}"));
 
     // --- 整体布局与尺寸（横版）---
@@ -1298,7 +1307,7 @@ pub fn generate_song_svg_string(data: &SongRenderData) -> Result<String, AppErro
     // 优先尝试使用当前曲目的曲绘作为背景
     // 使用预先缓存的封面文件列表来检查文件是否存在，避免重复的文件系统调用
     if cover_files.contains(&current_song_ill_path_png) {
-        if let Some(image_href) = get_background_image_href(&current_song_ill_path_png) {
+        if let Some(image_href) = get_image_href(&current_song_ill_path_png, embed_images) {
             background_image_href = Some(image_href);
             log::info!(
                 "使用当前曲目曲绘作为背景: {}",
@@ -1306,7 +1315,7 @@ pub fn generate_song_svg_string(data: &SongRenderData) -> Result<String, AppErro
             );
         }
     } else if cover_files.contains(&current_song_ill_path_jpg) {
-        if let Some(image_href) = get_background_image_href(&current_song_ill_path_jpg) {
+        if let Some(image_href) = get_image_href(&current_song_ill_path_jpg, embed_images) {
             background_image_href = Some(image_href);
             log::info!(
                 "使用当前曲目曲绘作为背景: {}",
@@ -1318,7 +1327,7 @@ pub fn generate_song_svg_string(data: &SongRenderData) -> Result<String, AppErro
         if !cover_files.is_empty() {
             let mut rng = rand::rng();
             if let Some(random_path) = cover_files.as_slice().choose(&mut rng) {
-                if let Some(image_href) = get_background_image_href(random_path) {
+                if let Some(image_href) = get_image_href(random_path, embed_images) {
                     background_image_href = Some(image_href);
                     log::info!("使用随机背景图: {}", random_path.display());
                 } else {

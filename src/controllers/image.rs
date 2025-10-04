@@ -20,10 +20,21 @@ pub enum Theme {
     White,
 }
 
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+#[derive(Default, ToSchema)]
+pub enum ImageFormat {
+    #[default]
+    Png,
+    Svg,
+}
+
 #[derive(Deserialize, Debug, ToSchema, IntoParams)]
 pub struct BnImageQuery {
     #[serde(default)]
     pub theme: Theme,
+    #[serde(default)]
+    pub format: ImageFormat,
 }
 
 #[derive(Deserialize, Debug, ToSchema, IntoParams)]
@@ -95,20 +106,35 @@ pub async fn generate_bn_image(
         return Err(AppError::BadRequest("N must be greater than 0".to_string()));
     }
 
-    let image_bytes = image_service
-        .generate_bn_image(
-            n,
-            req,
-            &query.theme,
-            phigros_service,
-            user_service,
-            player_archive_service,
-        )
-        .await?;
+    if query.format == ImageFormat::Svg {
+        let svg = image_service
+            .generate_bn_svg(
+                n,
+                req,
+                &query.theme,
+                phigros_service,
+                user_service,
+                player_archive_service,
+            )
+            .await?;
 
-    Ok(HttpResponse::Ok()
-        .content_type("image/png")
-        .body(image_bytes))
+        Ok(HttpResponse::Ok()
+            .content_type("image/svg+xml; charset=utf-8")
+            .body(svg))
+    } else {
+        let image_bytes = image_service
+            .generate_bn_image(
+                n,
+                req,
+                &query.theme,
+                phigros_service,
+                user_service,
+                player_archive_service,
+            )
+            .await?;
+
+        Ok(HttpResponse::Ok().content_type("image/png").body(image_bytes))
+    }
 }
 
 /// 生成单曲成绩图片
