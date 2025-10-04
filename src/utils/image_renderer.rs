@@ -88,6 +88,15 @@ static BACKGROUND_AND_COVER_CACHE: OnceLock<BackgroundAndCoverCache> = OnceLock:
 const BACKGROUND_CACHE_SIZE: usize = 10; // 缓存10张背景图片
 const COVER_METADATA_CACHE_SIZE: usize = 10000; // 缓存封面元数据
 
+// 背景主色反色缓存（避免重复解码大图）
+static INVERSE_COLOR_CACHE: OnceLock<std::sync::Mutex<LruCache<PathBuf, String>>> = OnceLock::new();
+
+fn get_inverse_color_cache() -> &'static std::sync::Mutex<LruCache<PathBuf, String>> {
+    INVERSE_COLOR_CACHE.get_or_init(|| {
+        std::sync::Mutex::new(LruCache::new(NonZeroUsize::new(256).unwrap()))
+    })
+}
+
 /// 初始化全局字体数据库
 fn init_global_font_db() -> Arc<fontdb::Database> {
     let mut font_db = fontdb::Database::new();
@@ -273,6 +282,22 @@ fn get_background_image(path: &PathBuf) -> Option<String> {
     }
 
     None
+}
+
+/// 返回适合放入 <image href> 的引用：小图返回 data URI，大图返回文件路径
+fn get_background_image_href(path: &PathBuf) -> Option<String> {
+    // 优先根据文件大小决定策略
+    if let Ok(meta) = fs::metadata(path) {
+        let len = meta.len();
+        // 小于等于256KB：使用 data URI（避免额外文件访问）
+        if len <= 256 * 1024 {
+            return get_background_image(path);
+        }
+        // 否则直接返回文件路径，交给 resvg 基于 resources_dir 读取
+        return Some(path.to_string_lossy().into_owned());
+    }
+    // 回退尝试 data URI
+    get_background_image(path)
 }
 
 // Helper function to generate a single score card SVG group
@@ -724,7 +749,7 @@ pub fn generate_svg_string(
             // 随机选择一个路径
             // --- 新增：计算背景主色的反色 ---
             if let crate::controllers::image::Theme::White = theme {
-                if let Some(inverse_color) = calculate_inverse_color_from_path(random_path) {
+                if let Some(inverse_color) = get_inverse_color_from_path_cached(random_path) {
                     normal_card_stroke_color = inverse_color;
                     log::info!("使用背景反色作为卡片边框: {normal_card_stroke_color}");
                 }
@@ -732,8 +757,8 @@ pub fn generate_svg_string(
             // --- 结束新增 ---
 
             // 使用缓存函数获取背景图片
-            if let Some(image_data) = get_background_image(random_path) {
-                background_image_href = Some(image_data);
+            if let Some(image_href) = get_background_image_href(random_path) {
+                background_image_href = Some(image_href);
                 log::info!("使用随机背景图: {}", random_path.display());
             } else {
                 log::error!("获取背景图片失败: {}", random_path.display());
@@ -1088,15 +1113,17 @@ pub fn generate_svg_string(
 
 // ... (render_svg_to_png function - unchanged) ...
 pub fn render_svg_to_png(svg_data: String, is_user_generated: bool) -> Result<Vec<u8>, AppError> {
-    // 使用全局字体数据库
-    let font_db = get_global_font_db(); // 获取字体数据库
+    // 分段计时，定位瓶颈
+    let t0 = std::time::Instant::now();
+
+    // 字体数据库（全局复用）
+    let font_db = get_global_font_db();
 
     let opts = UsvgOptions {
         resources_dir: Some(
             std::env::current_dir()
                 .map_err(|e| AppError::InternalError(format!("Failed to get current dir: {e}")))?,
         ),
-        // 将加载的字体数据库放入 Options 中
         fontdb: font_db,
         font_family: MAIN_FONT_NAME.to_string(),
         font_size: 16.0,
@@ -1107,39 +1134,54 @@ pub fn render_svg_to_png(svg_data: String, is_user_generated: bool) -> Result<Ve
         ..Default::default()
     };
 
-    // 现在调用 from_data 时，它会从 opts 中读取字体数据库
     let tree = usvg::Tree::from_data(svg_data.as_bytes(), &opts)
         .map_err(|e| AppError::InternalError(format!("Failed to parse SVG: {e}")))?;
+    let t_parse = t0.elapsed();
 
     let pixmap_size = tree.size().to_int_size();
     let mut pixmap = Pixmap::new(pixmap_size.width(), pixmap_size.height())
         .ok_or_else(|| AppError::InternalError("Failed to create pixmap".to_string()))?;
 
     render(&tree, Transform::default(), &mut pixmap.as_mut());
+    let t_raster = t0.elapsed();
 
-    let mut png_data = pixmap
-        .encode_png()
-        .map_err(|e| AppError::InternalError(format!("Failed to encode PNG: {e}")))?;
-
-    // 如果是用户生成的数据，添加隐式水印
+    // 用户数据添加隐式水印：直接修改未编码像素，避免解/编码开销
     if is_user_generated {
-        use image::{ImageBuffer, Rgba};
-        let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> = image::load_from_memory(&png_data)
-            .map_err(|e| AppError::InternalError(format!("Failed to decode PNG for watermarking: {e}")))?
-            .to_rgba8();
-
-        if img.width() > 0 && img.height() > 0 {
-            // 在 (0, 0) 像素点设置一个特定的颜色作为指纹
-            img.put_pixel(0, 0, Rgba([0x01, 0x02, 0x03, 0xFF]));
+        if let Some(px) = pixmap.data_mut().get_mut(0..4) {
+            px.copy_from_slice(&[0x01, 0x02, 0x03, 0xFF]);
         }
-
-        let mut cursor = std::io::Cursor::new(Vec::new());
-        img.write_to(&mut cursor, image::ImageFormat::Png)
-            .map_err(|e| AppError::InternalError(format!("Failed to re-encode PNG after watermarking: {e}")))?;
-        png_data = cursor.into_inner();
     }
 
-    Ok(png_data)
+    // 使用 png crate 进行快速编码
+    let mut out = Vec::with_capacity((pixmap_size.width() * pixmap_size.height() * 4) as usize);
+    {
+        let mut encoder = png::Encoder::new(&mut out, pixmap_size.width(), pixmap_size.height());
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_compression(png::Compression::Fast);
+        encoder.set_filter(png::FilterType::NoFilter);
+        // 如需更小体积可改为 Adaptive，但会更慢
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| AppError::InternalError(format!("PNG write_header error: {e}")))?;
+        writer
+            .write_image_data(pixmap.data())
+            .map_err(|e| AppError::InternalError(format!("PNG write_image_data error: {e}")))?;
+        writer
+            .finish()
+            .map_err(|e| AppError::InternalError(format!("PNG finish error: {e}")))?;
+    }
+    let t_encode = t0.elapsed();
+
+    log::info!(
+        "PNG渲染内部分段: 解析={:?}, 栅格化={:?}, 编码={:?}, 总计={:?}",
+        t_parse,
+        t_raster - t_parse,
+        t_encode - t_raster,
+        t_encode
+    );
+
+    Ok(out)
 }
 
 // ... (escape_xml function - unchanged) ...
@@ -1188,6 +1230,23 @@ fn calculate_inverse_color_from_path(path: &Path) -> Option<String> {
     let inv_b = 255 - avg_b;
 
     Some(format!("#{inv_r:02X}{inv_g:02X}{inv_b:02X}"))
+}
+
+/// 带缓存的反色计算，避免重复解码大图
+fn get_inverse_color_from_path_cached(path: &Path) -> Option<String> {
+    let key = PathBuf::from(path);
+    {
+        let mut cache = get_inverse_color_cache().lock().ok()?;
+        if let Some(c) = cache.get(&key) {
+            return Some(c.clone());
+        }
+    }
+
+    let color = calculate_inverse_color_from_path(path)?;
+    if let Ok(mut cache) = get_inverse_color_cache().lock() {
+        cache.put(key, color.clone());
+    }
+    Some(color)
 }
 
 // --- 新增：生成单曲成绩 SVG ---
@@ -1239,18 +1298,16 @@ pub fn generate_song_svg_string(data: &SongRenderData) -> Result<String, AppErro
     // 优先尝试使用当前曲目的曲绘作为背景
     // 使用预先缓存的封面文件列表来检查文件是否存在，避免重复的文件系统调用
     if cover_files.contains(&current_song_ill_path_png) {
-        // 使用缓存函数获取背景图片
-        if let Some(image_data) = get_background_image(&current_song_ill_path_png) {
-            background_image_href = Some(image_data);
+        if let Some(image_href) = get_background_image_href(&current_song_ill_path_png) {
+            background_image_href = Some(image_href);
             log::info!(
                 "使用当前曲目曲绘作为背景: {}",
                 current_song_ill_path_png.display()
             );
         }
     } else if cover_files.contains(&current_song_ill_path_jpg) {
-        // 使用缓存函数获取背景图片
-        if let Some(image_data) = get_background_image(&current_song_ill_path_jpg) {
-            background_image_href = Some(image_data);
+        if let Some(image_href) = get_background_image_href(&current_song_ill_path_jpg) {
+            background_image_href = Some(image_href);
             log::info!(
                 "使用当前曲目曲绘作为背景: {}",
                 current_song_ill_path_jpg.display()
@@ -1261,9 +1318,8 @@ pub fn generate_song_svg_string(data: &SongRenderData) -> Result<String, AppErro
         if !cover_files.is_empty() {
             let mut rng = rand::rng();
             if let Some(random_path) = cover_files.as_slice().choose(&mut rng) {
-                // 使用缓存函数获取背景图片
-                if let Some(image_data) = get_background_image(random_path) {
-                    background_image_href = Some(image_data);
+                if let Some(image_href) = get_background_image_href(random_path) {
+                    background_image_href = Some(image_href);
                     log::info!("使用随机背景图: {}", random_path.display());
                 } else {
                     log::error!("获取背景图片失败: {}", random_path.display());

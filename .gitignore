@@ -35,6 +35,8 @@ phi-backend-rust.exe
 /c/
 phigros_bindings.db-shm
 phigros_bindings.db-wal
+test.txt
+EXTERNAL_DATA_SOURCE_IMPLEMENTATION.md
 
 # 前端构建产物
 /html/

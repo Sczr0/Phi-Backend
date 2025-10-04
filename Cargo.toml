@@ -61,6 +61,9 @@ uuid = { version = "1.18", features = ["v4", "serde"] }
 # 图像处理 (基础库仍需要)
 image = { version = "0.25", features = ["png", "jpeg"] }
 
+# PNG 编码（用于自定义快速压缩设置）
+png = "0.17"
+
 # Git 操作
 git2 = "0.20"
 

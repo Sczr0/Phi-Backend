@@ -43,28 +43,34 @@ pub struct ImageService {
     push_acc_cache: Cache<(String, String), f64>,
     // 新增：用于限制并发图片渲染任务的信号量
     render_semaphore: Arc<Semaphore>,
+    // 新增：用于限制后台存档更新的并发
+    bg_task_semaphore: Arc<Semaphore>,
 }
 
 impl ImageService {
     pub fn new(max_concurrent_renders: usize) -> Self {
         Self {
-            // B-side图片缓存：最多缓存3000张，每张图片缓存5分钟
-            // 考虑到BN图片生成较重，增加缓存容量和时间
+            // 按字节加权的缓存，限制总内存占用
+            // BN 图片缓存：总容量 ~ 400MB，TTL 120s，TTI 60s
             bn_image_cache: Cache::builder()
-                .max_capacity(3000)
-                .time_to_live(Duration::from_secs(5 * 60))
+                .weigher(|_: &(u32, String, crate::controllers::image::Theme), v: &Arc<Vec<u8>>| v.len() as u32)
+                .max_capacity(400 * 1024 * 1024)
+                .time_to_live(Duration::from_secs(120))
+                .time_to_idle(Duration::from_secs(60))
                 .build(),
-            // 歌曲图片缓存：最多缓存5000张，每张图片缓存5分钟
-            // 歌曲图片相对轻量，可以缓存更多
+            // 歌曲图片缓存：总容量 ~ 200MB
             song_image_cache: Cache::builder()
-                .max_capacity(5000)
-                .time_to_live(Duration::from_secs(5 * 60))
+                .weigher(|_: &(String, String), v: &Arc<Vec<u8>>| v.len() as u32)
+                .max_capacity(200 * 1024 * 1024)
+                .time_to_live(Duration::from_secs(120))
+                .time_to_idle(Duration::from_secs(60))
                 .build(),
-            // 排行榜图片缓存：最多缓存100张，每张图片缓存5分钟
-            // 排行榜变化频繁，适当增加缓存时间和容量
+            // 排行榜图片缓存：总容量 ~ 100MB
             leaderboard_image_cache: Cache::builder()
-                .max_capacity(100)
-                .time_to_live(Duration::from_secs(5 * 60))
+                .weigher(|_: &(usize, String), v: &Arc<Vec<u8>>| v.len() as u32)
+                .max_capacity(100 * 1024 * 1024)
+                .time_to_live(Duration::from_secs(180))
+                .time_to_idle(Duration::from_secs(90))
                 .build(),
             // 推分ACC缓存：最多缓存10000个计算结果，缓存10分钟
             // 推分ACC计算复杂度高，需要更大的缓存
@@ -83,6 +89,8 @@ impl ImageService {
             db_pool: None,
             // 初始化信号量，限制并发渲染数量
             render_semaphore: Arc::new(Semaphore::new(max_concurrent_renders)),
+            // 初始化后台任务并发限制（默认 CPU 核心数）
+            bg_task_semaphore: Arc::new(Semaphore::new(std::cmp::max(2, num_cpus::get()))),
         }
     }
 
@@ -220,7 +228,9 @@ impl ImageService {
                 let player_name_clone = player_name_for_archive.clone();
                 let scores_clone = full_data.rks_result.records.clone();
                 let is_external = identifier.data_source.as_deref() == Some("external");
+                let bg_sem = self.bg_task_semaphore.clone();
                 tokio::spawn(async move {
+                    let _permit = bg_sem.acquire_owned().await.ok();
                     if let Err(e) = archive_service_clone
                         .update_player_scores_from_rks_records(
                             &player_id_clone,
@@ -566,7 +576,9 @@ impl ImageService {
                 let player_name_clone = player_name_for_archive.clone();
                 let records_clone = full_data.rks_result.records.clone();
                 let is_external = identifier.data_source.as_deref() == Some("external");
+                let bg_sem = self.bg_task_semaphore.clone();
                 tokio::spawn(async move {
+                    let _permit = bg_sem.acquire_owned().await.ok();
                     if let Err(e) = archive_service_clone
                         .update_player_scores_from_rks_records(
                             &player_id_clone,
