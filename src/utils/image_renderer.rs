@@ -78,11 +78,11 @@ const SONG_ILLUST_ASPECT_RATIO: f64 = 1.0; // 假设单曲图的插画是方形�
 static GLOBAL_FONT_DB: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
 
 // 背景图片 LRU 缓存和封面文件列表的组合结构
+// 注意：移除了重复的 HashSet，直接使用 HashMap 进行查找
 type BackgroundAndCoverCache = (
     std::sync::Mutex<LruCache<PathBuf, String>>,
     Vec<PathBuf>,
     std::sync::Mutex<HashMap<String, String>>,
-    std::sync::Mutex<std::collections::HashSet<PathBuf>>,
 );
 static BACKGROUND_AND_COVER_CACHE: OnceLock<BackgroundAndCoverCache> = OnceLock::new();
 const BACKGROUND_CACHE_SIZE: usize = 10; // 缓存10张背景图片
@@ -202,14 +202,12 @@ fn init_background_and_cover_cache() -> BackgroundAndCoverCache {
         }
     }
 
-    // 创建 HashSet 用于快速查找
-    let cover_files_set: std::collections::HashSet<PathBuf> = cover_files.iter().cloned().collect();
+    // 不再创建 HashSet，直接使用 metadata_map 进行查找以节省内存
 
     (
         cache,
         cover_files,
         std::sync::Mutex::new(metadata_map),
-        std::sync::Mutex::new(cover_files_set),
     )
 }
 
@@ -218,41 +216,37 @@ type BackgroundAndCoverCacheRefs = (
     &'static std::sync::Mutex<LruCache<PathBuf, String>>,
     &'static Vec<PathBuf>,
     &'static std::sync::Mutex<HashMap<String, String>>,
-    &'static std::sync::Mutex<std::collections::HashSet<PathBuf>>,
 );
 
 /// 获取背景图片缓存和封面文件列表
 fn get_background_and_cover_cache() -> BackgroundAndCoverCacheRefs {
-    let (cache, files, metadata, cover_set) =
+    let (cache, files, metadata) =
         BACKGROUND_AND_COVER_CACHE.get_or_init(init_background_and_cover_cache);
-    (cache, files, metadata, cover_set)
+    (cache, files, metadata)
 }
 
 /// 获取背景图片缓存
 pub fn get_background_cache() -> &'static std::sync::Mutex<LruCache<PathBuf, String>> {
-    let (cache, _, _, _) = get_background_and_cover_cache();
+    let (cache, _, _) = get_background_and_cover_cache();
     cache
 }
 
 /// 获取封面文件列表
 pub fn get_cover_files() -> &'static Vec<PathBuf> {
-    let (_, files, _, _) = get_background_and_cover_cache();
+    let (_, files, _) = get_background_and_cover_cache();
     files
 }
 
 /// 获取封面元数据缓存
 pub fn get_cover_metadata_cache() -> &'static std::sync::Mutex<HashMap<String, String>> {
-    let (_, _, metadata, _) = get_background_and_cover_cache();
+    let (_, _, metadata) = get_background_and_cover_cache();
     metadata
 }
 
-/// 获取封面文件快速查找集合
-pub fn get_cover_set() -> &'static std::sync::Mutex<std::collections::HashSet<PathBuf>> {
-    let (_, _, _, cover_set) = get_background_and_cover_cache();
-    cover_set
-}
+
 
 /// 从缓存或磁盘加载背景图片
+/// 注意：现在只缓存小图（<256KB），大图直接返回路径
 fn get_background_image(path: &PathBuf) -> Option<String> {
     let mut cache = get_background_cache().lock().unwrap();
 
@@ -263,22 +257,24 @@ fn get_background_image(path: &PathBuf) -> Option<String> {
 
     // 缓存未命中，从磁盘加载
     if let Ok(data) = fs::read(path) {
-        let mime_type = if path.extension().is_some_and(|ext| ext == "png") {
-            "image/png"
-        } else {
-            "image/jpeg"
-        };
-        let base64_encoded = base64_engine.encode(&data);
-        let image_data = format!("data:{mime_type};base64,{base64_encoded}");
-
-        // 放入缓存，但限制单个文件大小
         let file_size = data.len();
-        if file_size <= 1024 * 1024 {
-            // 限制1MB以内
+        
+        // 只对小于 256KB 的图片进行 Base64 编码并缓存
+        // 大图片直接返回路径，避免内存膨胀
+        if file_size <= 256 * 1024 {
+            let mime_type = if path.extension().is_some_and(|ext| ext == "png") {
+                "image/png"
+            } else {
+                "image/jpeg"
+            };
+            let base64_encoded = base64_engine.encode(&data);
+            let image_data = format!("data:{mime_type};base64,{base64_encoded}");
             cache.put(path.clone(), image_data.clone());
+            return Some(image_data);
         }
-
-        return Some(image_data);
+        
+        // 大图片直接返回文件路径
+        return Some(path.to_string_lossy().into_owned());
     }
 
     None
@@ -390,8 +386,7 @@ fn generate_card_svg(info: CardRenderInfo) -> Result<(), AppError> {
         .get(&score.song_id)
         .cloned()
         .or_else(|| {
-            // 回退检查：尝试从缓存文件列表中查找（使用 HashSet 快速查找）
-            let cover_set = get_cover_set().lock().unwrap();
+            // 回退检查：尝试从缓存文件列表中查找（直接使用文件系统检查，避免HashSet内存占用）
             let cover_path_low_png = PathBuf::from(cover_loader::COVERS_DIR)
                 .join("illLow")
                 .join(format!("{}.png", score.song_id));
@@ -405,13 +400,13 @@ fn generate_card_svg(info: CardRenderInfo) -> Result<(), AppError> {
                 .join("ill")
                 .join(format!("{}.jpg", score.song_id));
 
-            if cover_set.contains(&cover_path_low_png) {
+            if cover_path_low_png.exists() {
                 Some(cover_path_low_png.to_string_lossy().into_owned())
-            } else if cover_set.contains(&cover_path_low_jpg) {
+            } else if cover_path_low_jpg.exists() {
                 Some(cover_path_low_jpg.to_string_lossy().into_owned())
-            } else if cover_set.contains(&cover_path_std_png) {
+            } else if cover_path_std_png.exists() {
                 Some(cover_path_std_png.to_string_lossy().into_owned())
-            } else if cover_set.contains(&cover_path_std_jpg) {
+            } else if cover_path_std_jpg.exists() {
                 Some(cover_path_std_jpg.to_string_lossy().into_owned())
             } else {
                 None
@@ -1204,10 +1199,14 @@ fn escape_xml(input: &str) -> String {
 }
 
 /// 从图片路径计算主色的反色
+/// 优化：使用缩略图（100x100）计算颜色，而不是全尺寸图片
 fn calculate_inverse_color_from_path(path: &Path) -> Option<String> {
     // 使用 image crate 打开图片
     let img = image::open(path).ok()?;
-    let pixels = img.to_rgba8().into_raw();
+    
+    // 缩小到 100x100 计算颜色，大幅减少内存使用和计算时间
+    let thumbnail = img.thumbnail(100, 100);
+    let pixels = thumbnail.to_rgba8().into_raw();
 
     if pixels.is_empty() {
         return None;

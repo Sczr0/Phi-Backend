@@ -269,28 +269,46 @@ impl ImageService {
         Ok(svg_string)
     }
     pub fn new(max_concurrent_renders: usize) -> Self {
+        // 从环境变量读取缓存大小配置（单位：MB），未设置则使用默认值
+        let bn_cache_mb = std::env::var("BN_IMAGE_CACHE_MB")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(100); // 默认 100MB（从 400MB 减少）
+        
+        let song_cache_mb = std::env::var("SONG_IMAGE_CACHE_MB")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(50); // 默认 50MB（从 200MB 减少）
+        
+        let leaderboard_cache_mb = std::env::var("LEADERBOARD_IMAGE_CACHE_MB")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(100); // 默认 100MB（保持不变）
+        
+        log::info!("图片缓存配置: BN={}MB, Song={}MB, Leaderboard={}MB", 
+                   bn_cache_mb, song_cache_mb, leaderboard_cache_mb);
         Self {
             // 按字节加权的缓存，限制总内存占用
             // BN 图片缓存：总容量 ~ 400MB，TTL 120s，TTI 60s
             bn_image_cache: Cache::builder()
                 .weigher(|_: &(u32, String, crate::controllers::image::Theme), v: &Arc<Vec<u8>>| v.len() as u32)
-                .max_capacity(400 * 1024 * 1024)
-                .time_to_live(Duration::from_secs(120))
-                .time_to_idle(Duration::from_secs(60))
+                .max_capacity(bn_cache_mb * 1024 * 1024)
+                .time_to_live(Duration::from_secs(60))  // 从 120s 减少到 60s
+                .time_to_idle(Duration::from_secs(30))  // 从 60s 减少到 30s
                 .build(),
             // 歌曲图片缓存：总容量 ~ 200MB
             song_image_cache: Cache::builder()
                 .weigher(|_: &(String, String), v: &Arc<Vec<u8>>| v.len() as u32)
-                .max_capacity(200 * 1024 * 1024)
-                .time_to_live(Duration::from_secs(120))
-                .time_to_idle(Duration::from_secs(60))
+                .max_capacity(song_cache_mb * 1024 * 1024)
+                .time_to_live(Duration::from_secs(60))  // 从 120s 减少到 60s
+                .time_to_idle(Duration::from_secs(30))  // 从 60s 减少到 30s
                 .build(),
             // 排行榜图片缓存：总容量 ~ 100MB
             leaderboard_image_cache: Cache::builder()
                 .weigher(|_: &(usize, String), v: &Arc<Vec<u8>>| v.len() as u32)
-                .max_capacity(100 * 1024 * 1024)
-                .time_to_live(Duration::from_secs(180))
-                .time_to_idle(Duration::from_secs(90))
+                .max_capacity(leaderboard_cache_mb * 1024 * 1024)
+                .time_to_live(Duration::from_secs(120)) // 从 180s 减少到 120s
+                .time_to_idle(Duration::from_secs(60))  // 从 90s 减少到 60s
                 .build(),
             // 推分ACC缓存：最多缓存10000个计算结果，缓存10分钟
             // 推分ACC计算复杂度高，需要更大的缓存

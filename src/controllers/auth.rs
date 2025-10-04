@@ -25,6 +25,7 @@ pub struct QrCodeState {
     pub session_token: Option<String>,
     #[serde(skip)]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    // 未来可以添加: pub last_checked: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -154,6 +155,16 @@ pub async fn generate_qr_code() -> impl Responder {
 )]
 pub async fn check_qr_status(path: web::Path<String>) -> impl Responder {
     let qr_id = path.into_inner();
+
+    // --- 清理过期的二维码（每次检查时清理，避免内存泄漏） ---
+    {
+        let mut store = QR_CODE_STORE.lock().unwrap();
+        let now = chrono::Utc::now();
+        store.retain(|_, state| {
+            // 保留 5 分钟内的二维码
+            now.signed_duration_since(state.created_at).num_seconds() < 300
+        });
+    }
 
     // --- 第1步：缩小锁的作用域，只用于读取 ---
     // 我们只在这里读取一次，然后立即释放锁
