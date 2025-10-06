@@ -78,26 +78,22 @@ fn setup_systemd_notify() {
     }
 
     // 如果启用了 Watchdog，则周期性喂狗（间隔的一半）
-    match sd_notify::watchdog_enabled(false) {
-        Ok(Some(interval)) => {
-            let period = interval / 2;
-            log::info!("侦测到 systemd Watchdog 已启用，周期: {:?}", interval);
-            tokio::spawn(async move {
-                let mut ticker = tokio::time::interval(period);
-                loop {
-                    ticker.tick().await;
-                    if let Err(e) = sd_notify::notify(false, &[sd_notify::NotifyState::Watchdog]) {
-                        log::warn!("发送 systemd WATCHDOG 喂狗失败: {e}");
-                    }
+    let mut usec: u64 = 0;
+    if sd_notify::watchdog_enabled(false, &mut usec) {
+        let interval = std::time::Duration::from_micros(usec);
+        let period = interval / 2;
+        log::info!("侦测到 systemd Watchdog 已启用，周期: {:?}", interval);
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(period);
+            loop {
+                ticker.tick().await;
+                if let Err(e) = sd_notify::notify(false, &[sd_notify::NotifyState::Watchdog]) {
+                    log::warn!("发送 systemd WATCHDOG 喂狗失败: {e}");
                 }
-            });
-        }
-        Ok(None) => {
-            log::info!("systemd Watchdog 未启用（未设置 WATCHDOG_USEC）");
-        }
-        Err(e) => {
-            log::warn!("检测 systemd Watchdog 失败: {e}");
-        }
+            }
+        });
+    } else {
+        log::info!("systemd Watchdog 未启用（未设置 WATCHDOG_USEC 或 PID 不匹配）");
     }
 }
 
