@@ -67,6 +67,43 @@ use utils::cover_loader;
 )]
 struct ApiDoc;
 
+// systemd 通知与看门狗集成
+#[cfg(target_os = "linux")]
+fn setup_systemd_notify() {
+    // 发送 READY=1，告知 systemd 服务已就绪
+    if let Err(e) = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]) {
+        log::debug!("发送 systemd READY 通知失败: {e}");
+    } else {
+        log::info!("已向 systemd 发送 READY=1");
+    }
+
+    // 如果启用了 Watchdog，则周期性喂狗（间隔的一半）
+    match sd_notify::watchdog_enabled(false) {
+        Ok(Some(interval)) => {
+            let period = interval / 2;
+            log::info!("侦测到 systemd Watchdog 已启用，周期: {:?}", interval);
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(period);
+                loop {
+                    ticker.tick().await;
+                    if let Err(e) = sd_notify::notify(false, &[sd_notify::NotifyState::Watchdog]) {
+                        log::warn!("发送 systemd WATCHDOG 喂狗失败: {e}");
+                    }
+                }
+            });
+        }
+        Ok(None) => {
+            log::info!("systemd Watchdog 未启用（未设置 WATCHDOG_USEC）");
+        }
+        Err(e) => {
+            log::warn!("检测 systemd Watchdog 失败: {e}");
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn setup_systemd_notify() {}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     // 初始化配置
@@ -182,11 +219,22 @@ async fn main() -> std::io::Result<()> {
     //    这样我们的 main 函数就不会被阻塞，可以继续执行下面的代码
     tokio::spawn(server);
 
+    // 启动后向 systemd 报告 READY，并在后台定期喂狗（若启用）
+    setup_systemd_notify();
+
     // 4. 等待关闭信号 (Ctrl+C 或 SIGTERM)
     //    tokio::signal::ctrl_c() 会同时监听这两种信号
     tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl-c signal");
 
     log::info!("收到关闭信号, 正在关闭...");
+
+    // 通知 systemd 正在停止（Type=notify 下可选）
+    #[cfg(target_os = "linux")]
+    {
+        if let Err(e) = sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]) {
+            log::debug!("发送 systemd STOPPING 通知失败: {e}");
+        }
+    }
 
     // 5. 使用句柄来优雅地停止服务器
     //    stop(true) 表示 graceful shutdown

@@ -99,3 +99,7 @@ debug = true
 # cargo-machete 的配置。如果没有任何需要忽略的依赖，此部分可以完全删除。
 [package.metadata.cargo-machete]
 ignored = []
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# systemd 通知与看门狗支持（仅在 Linux 构建时启用）
+sd-notify = "0.4"
