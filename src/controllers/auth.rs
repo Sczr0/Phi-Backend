@@ -34,6 +34,8 @@ pub struct GenerateQrCodeResponse {
     pub qr_id: String,
     #[serde(rename = "qrCodeImage")]
     pub qr_code_image: String,
+    #[serde(rename = "qrcodeUrl")]
+    pub qrcode_url: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -129,6 +131,7 @@ pub async fn generate_qr_code() -> impl Responder {
             HttpResponse::Ok().json(GenerateQrCodeResponse {
                 qr_id,
                 qr_code_image,
+                qrcode_url: qr_code_data.qrcode_url.clone(),
             })
         }
         Err(e) => {
