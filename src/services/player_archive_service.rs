@@ -442,13 +442,7 @@ ORDER BY rs.play_time DESC;
         use crate::utils::rks_utils::calculate_target_chart_push_acc;
         log::info!("重新计算玩家[{player_id}]推分ACC");
 
-        // 获取玩家存档
-        let _archive = self
-            .get_player_archive(player_id)
-            .await?
-            .ok_or_else(|| AppError::DatabaseError(format!("玩家不存在: {player_id}")))?;
-
-        // 获取所有当前成绩用于推分计算
+        // 直接从数据库获取所有当前成绩,避免调用get_player_archive造成缓存锁竞争
         let all_scores: Vec<ChartScore> = query_as(
             "SELECT song_id, song_name, difficulty, difficulty_value, score, acc, rks, is_fc, is_phi, play_time
              FROM chart_scores
@@ -458,6 +452,12 @@ ORDER BY rs.play_time DESC;
         .fetch_all(&self.pool)
         .await
         .map_err(|e| AppError::DatabaseError(format!("获取成绩记录失败: {e}")))?;
+        
+        // 如果没有成绩记录,直接返回
+        if all_scores.is_empty() {
+            log::warn!("玩家[{player_id}]没有成绩记录,跳过推分ACC计算");
+            return Ok(());
+        }
 
         // 将数据库记录转换为RksRecord用于推分计算
         let rks_records: Vec<RksRecord> = all_scores

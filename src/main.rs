@@ -115,8 +115,10 @@ fn setup_systemd_watchdog_health(health_url: String) {
         let period = interval / 2;
         log::info!("侦测到 systemd Watchdog 已启用，周期: {:?}", interval);
         tokio::spawn(async move {
+            let health_check_timeout = std::time::Duration::from_millis((period.as_millis() as u64 * 7 / 10).max(2000));
             let client = match reqwest::Client::builder()
-                .timeout(std::time::Duration::from_millis((period.as_millis() as u64 / 2).max(500)))
+                .timeout(health_check_timeout)
+                .pool_max_idle_per_host(2)
                 .build() {
                 Ok(c) => c,
                 Err(e) => {
@@ -127,7 +129,7 @@ fn setup_systemd_watchdog_health(health_url: String) {
             let mut ticker = tokio::time::interval(period);
             loop {
                 ticker.tick().await;
-                let check_timeout = period / 2;
+                let check_timeout = period * 7 / 10;
                 let ok = match tokio::time::timeout(check_timeout, client.get(&health_url).send()).await {
                     Ok(Ok(resp)) => resp.status().is_success(),
                     Ok(Err(e)) => {
@@ -223,7 +225,9 @@ async fn main() -> std::io::Result<()> {
         .busy_timeout(std::time::Duration::from_secs(5));
 
     let pool = SqlitePoolOptions::new()
-        .max_connections(5)
+        .max_connections(10)
+        .acquire_timeout(std::time::Duration::from_secs(30))
+        .idle_timeout(Some(std::time::Duration::from_secs(600)))
         .connect_with(connect_options)
         .await
         .map_err(|e| {
