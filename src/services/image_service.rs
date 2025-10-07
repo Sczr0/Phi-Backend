@@ -387,7 +387,7 @@ impl ImageService {
             return Ok(cached.to_vec());
         }
 
-        let image_bytes_arc = self
+        let compute_fut = self
             .bn_image_cache
             .try_get_with(cache_key, async {
                 let data_fetch_start = std::time::Instant::now();
@@ -485,33 +485,38 @@ impl ImageService {
                     }
                 });
 
-                // --- 异步预计算推分ACC ---
+                // --- 预计算推分ACC（移至阻塞线程，避免阻塞 Actix worker） ---
                 let push_acc_start = std::time::Instant::now();
-                let mut push_acc_map: HashMap<String, f64> = HashMap::new();
-                let mut sorted_scores_for_push = full_data.rks_result.records.clone();
-                sorted_scores_for_push.sort_by(|a, b| b.rks.partial_cmp(&a.rks).unwrap_or(Ordering::Equal));
-                let top_n_scores_for_push: Vec<RksRecord> = sorted_scores_for_push
-                    .iter()
-                    .take(n as usize)
-                    .cloned()
-                    .collect();
+                let scores_for_push = full_data.rks_result.records.clone();
+                let n_for_push = n as usize;
+                let push_acc_map: HashMap<String, f64> = tokio::task::spawn_blocking(move || {
+                    let mut sorted_scores_for_push = scores_for_push;
+                    sorted_scores_for_push.sort_by(|a, b| b.rks.partial_cmp(&a.rks).unwrap_or(Ordering::Equal));
+                    let top_n_scores_for_push: Vec<RksRecord> = sorted_scores_for_push
+                        .iter()
+                        .take(n_for_push)
+                        .cloned()
+                        .collect();
 
-                for score in top_n_scores_for_push
-                    .iter()
-                    .filter(|s| s.acc < 100.0 && s.difficulty_value > 0.0)
-                {
-                    let key = (format!("{}-{}", score.song_id, score.difficulty), player_id.clone());
-                    if let Some(cached) = self.push_acc_cache.get(&key).await {
-                        push_acc_map.insert(key.0, cached);
-                    } else if let Some(push_acc) = rks_utils::calculate_target_chart_push_acc(
-                        &key.0,
-                        score.difficulty_value,
-                        &top_n_scores_for_push,
-                    ) {
-                        self.push_acc_cache.insert(key.clone(), push_acc).await;
-                        push_acc_map.insert(key.0, push_acc);
+                    let mut map: HashMap<String, f64> = HashMap::new();
+                    for score in top_n_scores_for_push
+                        .iter()
+                        .filter(|s| s.acc < 100.0 && s.difficulty_value > 0.0)
+                    {
+                        let key0 = format!("{}-{}", score.song_id, score.difficulty);
+                        if let Some(push_acc) = rks_utils::calculate_target_chart_push_acc(
+                            &key0,
+                            score.difficulty_value,
+                            &top_n_scores_for_push,
+                        ) {
+                            map.insert(key0, push_acc);
+                        }
                     }
-                }
+                    map
+                })
+                .await
+                .map_err(|e| AppError::InternalError(format!("Push-ACC blocking task error: {e}")))?;
+
                 log::info!(
                     "BN图片生成 - 推分ACC计算耗时: {:?}",
                     push_acc_start.elapsed()
@@ -540,8 +545,11 @@ impl ImageService {
                 log::info!("BN图片生成 - 渲染总耗时: {:?}", render_start.elapsed());
 
                 Ok(Arc::new(png_data))
-            })
+            });
+
+        let image_bytes_arc = tokio::time::timeout(std::time::Duration::from_secs(20), compute_fut)
             .await
+            .map_err(|_| AppError::InternalError("BN 图片生成任务超时".to_string()))?
             .map_err(|e: Arc<AppError>| AppError::InternalError(e.to_string()))?;
 
         self.bn_cache_misses.fetch_add(1, AtomicOrdering::Relaxed);

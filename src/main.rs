@@ -69,7 +69,7 @@ struct ApiDoc;
 
 // systemd 通知与看门狗集成
 #[cfg(target_os = "linux")]
-fn setup_systemd_notify() {
+fn setup_systemd_notify(health_url: String) {
     // 发送 READY=1，告知 systemd 服务已就绪
     if let Err(e) = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]) {
         log::debug!("发送 systemd READY 通知失败: {e}");
@@ -98,7 +98,89 @@ fn setup_systemd_notify() {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn setup_systemd_notify() {}
+fn setup_systemd_notify(_health_url: String) {}
+
+// 新增：基于 /health 的 systemd Watchdog 喂狗
+#[cfg(target_os = "linux")]
+fn setup_systemd_watchdog_health(health_url: String) {
+    if let Err(e) = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]) {
+        log::debug!("发送 systemd READY 通知失败: {e}");
+    } else {
+        log::info!("已向 systemd 发送 READY=1");
+    }
+
+    let mut usec: u64 = 0;
+    if sd_notify::watchdog_enabled(false, &mut usec) {
+        let interval = std::time::Duration::from_micros(usec);
+        let period = interval / 2;
+        log::info!("侦测到 systemd Watchdog 已启用，周期: {:?}", interval);
+        tokio::spawn(async move {
+            let client = match reqwest::Client::builder()
+                .timeout(std::time::Duration::from_millis((period.as_millis() as u64 / 2).max(500)))
+                .build() {
+                Ok(c) => c,
+                Err(e) => {
+                    log::error!("创建健康检查 HTTP 客户端失败: {e}");
+                    return;
+                }
+            };
+            let mut ticker = tokio::time::interval(period);
+            loop {
+                ticker.tick().await;
+                let check_timeout = period / 2;
+                let ok = match tokio::time::timeout(check_timeout, client.get(&health_url).send()).await {
+                    Ok(Ok(resp)) => resp.status().is_success(),
+                    Ok(Err(e)) => {
+                        log::warn!("Watchdog 健康检查请求失败: {e}");
+                        false
+                    }
+                    Err(_) => {
+                        log::warn!("Watchdog 健康检查超时: {}", &health_url);
+                        false
+                    }
+                };
+                if ok {
+                    if let Err(e) = sd_notify::notify(false, &[sd_notify::NotifyState::Watchdog]) {
+                        log::warn!("发送 systemd WATCHDOG 喂狗失败: {e}");
+                    }
+                } else {
+                    log::error!("健康检查失败，跳过本次 Watchdog 心跳");
+                }
+            }
+        });
+    } else {
+        log::info!("systemd Watchdog 未启用（未设置 WATCHDOG_USEC 或 PID 不匹配）");
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn setup_systemd_watchdog_health(_health_url: String) {}
+
+#[cfg(target_os = "linux")]
+async fn wait_for_shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let mut sigterm = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+    let mut sigint = signal(SignalKind::interrupt()).expect("install SIGINT handler");
+
+    tokio::select! {
+        _ = sigterm.recv() => {
+            log::info!("收到 SIGTERM, 准备优雅关闭...");
+        }
+        _ = sigint.recv() => {
+            log::info!("收到 SIGINT, 准备优雅关闭...");
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn wait_for_shutdown_signal() {
+    // 非 Linux 平台：仅监听 Ctrl+C
+    tokio::signal::ctrl_c()
+        .await
+        .expect("Failed to listen for ctrl-c signal");
+    log::info!("收到关闭信号, 正在关闭...");
+}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -213,16 +295,31 @@ async fn main() -> std::io::Result<()> {
 
     // 3. 将服务器的 future 放到一个单独的 Tokio 任务中运行
     //    这样我们的 main 函数就不会被阻塞，可以继续执行下面的代码
-    tokio::spawn(server);
+    let mut server_task = tokio::spawn(server);
 
-    // 启动后向 systemd 报告 READY，并在后台定期喂狗（若启用）
-    setup_systemd_notify();
+    // 启动后向 systemd 报告 READY，并基于 /health 定期喂狗（若启用）
+    let health_url = format!("http://127.0.0.1:{}/health", port);
+    setup_systemd_watchdog_health(health_url);
 
-    // 4. 等待关闭信号 (Ctrl+C 或 SIGTERM)
-    //    tokio::signal::ctrl_c() 会同时监听这两种信号
-    tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl-c signal");
-
-    log::info!("收到关闭信号, 正在关闭...");
+    // 4. 等待关闭信号 (Ctrl+C 或 SIGTERM on Linux)，或服务器异常退出
+    tokio::select! {
+        _ = wait_for_shutdown_signal() => {
+            log::info!("开始优雅停止 Actix 服务器...");
+        }
+        res = &mut server_task => {
+            match res {
+                Ok(Ok(())) => {
+                    log::warn!("Actix 服务器已主动退出");
+                }
+                Ok(Err(e)) => {
+                    log::error!("Actix 服务器运行错误: {e}");
+                }
+                Err(e) => {
+                    log::error!("Actix 服务器 Join 失败: {e}");
+                }
+            }
+        }
+    }
 
     // 通知 systemd 正在停止（Type=notify 下可选）
     #[cfg(target_os = "linux")]
@@ -237,6 +334,11 @@ async fn main() -> std::io::Result<()> {
     server_handle.stop(true).await;
 
     log::info!("服务器已停止。");
+
+    // 等待服务器任务真正结束，避免悬挂
+    if let Err(e) = server_task.await {
+        log::error!("等待服务器任务结束失败: {e}");
+    }
 
     // 可以在这里添加任何其他的清理代码
     // pool.close().await;
