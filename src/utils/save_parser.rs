@@ -423,12 +423,13 @@ pub fn decrypt_save(save_dict: HashMap<String, Vec<u8>>) -> AppResult<GameSave> 
             }
         }
 
-        if reader.remaining() > 0 {
-            log::warn!(
-                "文件 {} 解析后仍有 {} 字节未读取",
-                filename,
-                reader.remaining()
-            );
+        let rem = reader.remaining();
+        if rem > 0 {
+            if rem <= 4 {
+                log::debug!("文件 {} 末尾存在对齐填充 {} 字节，已忽略", filename, rem);
+            } else {
+                log::warn!("文件 {} 解析后仍有 {} 字节未读取", filename, rem);
+            }
         }
     }
     log::debug!("存档解密和初步解析完成");

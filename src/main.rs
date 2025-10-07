@@ -1,7 +1,7 @@
 use actix_cors::Cors;
 use actix_web::{middleware, web, App, HttpServer};
 use env_logger::Env;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteJournalMode};
 use std::env;
 use std::str::FromStr;
 use utoipa::OpenApi;
@@ -218,7 +218,9 @@ async fn main() -> std::io::Result<()> {
             log::error!("数据库URL格式无效: {e}");
             std::io::Error::new(std::io::ErrorKind::InvalidInput, e)
         })?
-        .create_if_missing(true);
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .busy_timeout(std::time::Duration::from_secs(5));
 
     let pool = SqlitePoolOptions::new()
         .max_connections(5)

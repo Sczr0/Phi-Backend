@@ -105,7 +105,11 @@ impl ImageService {
             )));
         }
 
-        let player_nickname = profile_res.ok().map(|p| p.nickname);
+        // 优先从 Profile 提取 objectId 与昵称，避免存档内缺失导致 player_id=unknown
+        let (profile_object_id, player_nickname) = match profile_res {
+            Ok(p) => (Some(p.object_id), Some(p.nickname)),
+            Err(_) => (None, None),
+        };
 
         let (player_id, player_name) = if identifier.data_source.as_deref() == Some("external") {
             let player_id = full_data.cloud_summary["results"][0]["PlayerId"]
@@ -118,14 +122,16 @@ impl ImageService {
                 .to_string();
             (player_id, player_name)
         } else {
-            let player_id = full_data
-                .save
-                .user
-                .as_ref()
-                .and_then(|u| u.get("objectId"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string();
+            let player_id = profile_object_id.unwrap_or_else(|| {
+                full_data
+                    .save
+                    .user
+                    .as_ref()
+                    .and_then(|u| u.get("objectId"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string()
+            });
             let player_name = player_nickname.clone().unwrap_or(player_id.clone());
             (player_id, player_name)
         };
@@ -422,7 +428,11 @@ impl ImageService {
                     )));
                 }
 
-                let player_nickname = profile_res.ok().map(|p| p.nickname);
+                // 优先从 Profile 提取 objectId 与昵称，避免存档内缺失导致 player_id=unknown
+                let (profile_object_id, player_nickname) = match profile_res {
+                    Ok(p) => (Some(p.object_id), Some(p.nickname)),
+                    Err(_) => (None, None),
+                };
 
                 let (player_id, player_name) = if identifier.data_source.as_deref() == Some("external") {
                     // 外部数据源：从外部API响应中获取PlayerId和玩家名称
@@ -436,15 +446,17 @@ impl ImageService {
                         .to_string();
                     (player_id, player_name)
                 } else {
-                    // 内部数据源：从存档数据中获取objectId和玩家名称
-                    let player_id = full_data
-                        .save
-                        .user
-                        .as_ref()
-                        .and_then(|u| u.get("objectId"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string();
+                    // 内部数据源：优先使用 Profile 中的 objectId，其次回退到存档
+                    let player_id = profile_object_id.unwrap_or_else(|| {
+                        full_data
+                            .save
+                            .user
+                            .as_ref()
+                            .and_then(|u| u.get("objectId"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string()
+                    });
                     let player_name = player_nickname.clone().unwrap_or(player_id.clone());
                     (player_id, player_name)
                 };
@@ -773,7 +785,11 @@ impl ImageService {
                 };
 
                 let full_data = full_data_res?;
-                let player_nickname = profile_res.ok().map(|p| p.nickname);
+                // 优先从 Profile 提取 objectId 与昵称，避免存档内缺失导致 player_id=unknown
+                let (profile_object_id, player_nickname) = match profile_res {
+                    Ok(p) => (Some(p.object_id), Some(p.nickname)),
+                    Err(_) => (None, None),
+                };
                 let (player_id, player_name) = if identifier.data_source.as_deref() == Some("external") {
                     // 外部数据源：从外部API响应中获取PlayerId和玩家名称
                     let player_id = full_data.cloud_summary["results"][0]["PlayerId"]
@@ -786,15 +802,17 @@ impl ImageService {
                         .to_string();
                     (player_id, player_name)
                 } else {
-                    // 内部数据源：从存档数据中获取objectId和玩家名称
-                    let player_id = full_data
-                        .save
-                        .user
-                        .as_ref()
-                        .and_then(|u| u.get("objectId"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string();
+                    // 内部数据源：优先使用 Profile 中的 objectId，其次回退到存档
+                    let player_id = profile_object_id.unwrap_or_else(|| {
+                        full_data
+                            .save
+                            .user
+                            .as_ref()
+                            .and_then(|u| u.get("objectId"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string()
+                    });
                     let player_name = player_nickname.unwrap_or(player_id.clone());
                     (player_id, player_name)
                 };

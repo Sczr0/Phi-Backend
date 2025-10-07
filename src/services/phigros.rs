@@ -5,6 +5,7 @@ use crate::models::user::UserProfile;
 use crate::utils::error::{AppError, AppResult};
 use crate::utils::save_parser::{parse_save, parse_save_with_difficulty};
 use reqwest::Client;
+use std::time::Duration;
 use std::collections::HashMap;
 use serde_json::json;
 
@@ -26,9 +27,17 @@ pub struct PhigrosService {
 impl PhigrosService {
     // 创建新的Phigros服务
     pub fn new() -> Self {
-        Self {
-            client: Client::new(),
-        }
+        let client = Client::builder()
+            .connect_timeout(Duration::from_secs(3))
+            .timeout(Duration::from_secs(12))
+            .pool_idle_timeout(Duration::from_secs(30))
+            .pool_max_idle_per_host(8)
+            .build()
+            .unwrap_or_else(|e| {
+                log::warn!("构建 HTTP 客户端失败，回退默认设置: {e}");
+                Client::new()
+            });
+        Self { client }
     }
 
     // 获取存档数据并解析
