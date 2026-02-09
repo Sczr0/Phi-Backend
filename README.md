@@ -2,6 +2,8 @@
 
 基于Rust的Phigros后端服务，提供绑定、存档解析、RKS计算以及单曲成绩查询等功能。
 
+目前不再推荐使用（存在莫名其妙的内存泄露问题），请使用：https://github.com/Sczr0/Next-Phi-Backend
+
 ## 功能
 
 - 绑定Phigros的sessionToken
